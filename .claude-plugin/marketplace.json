@@ -1,0 +1,13 @@
+{
+  "name": "lukantan",
+  "owner": {
+    "name": "Lukantan"
+  },
+  "plugins": [
+    {
+      "name": "validai",
+      "source": "./plugins/validai",
+      "description": "Prepare a prototype for user validation in ValidAI: recommend Task Flows from your goals and evidence, tag click targets, then push or package a .validai file."
+    }
+  ]
+}
