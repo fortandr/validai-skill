@@ -2,14 +2,14 @@
 name: validai
 description: Prepare a prototype for user validation in ValidAI — read the prototype, recommend Task Flows from the PM's goals and validation evidence (in-person notes, transcripts, PRD), tag click targets with data-validai-target, then push to ValidAI or package a .validai file. Use when the user mentions ValidAI, wants to test or validate a prototype with users, or wants task flows created.
 metadata:
-  version: "2026.10.1"
+  version: "2026.10.2"
 ---
 
 # ValidAI: prepare a prototype for validation
 
 Use this when a PM wants to test a prototype in ValidAI: upload it, turn their goals and validation evidence into recommended **Task Flows**, and make testers' clicks register reliably.
 
-ValidAI app: https://validai.lukantan.com · Skill version: 2026.10.1
+ValidAI app: https://validai.lukantan.com · Skill version: 2026.10.2
 
 ## Ground rules
 
@@ -21,6 +21,7 @@ ValidAI app: https://validai.lukantan.com · Skill version: 2026.10.1
 ## 1. Read the prototype
 
 - Detect the stack (static HTML, Vite/React or another bundler, other). Find the build command and the build output folder (`dist/`, `build/` or `out/`, which must contain `index.html`).
+- Testers can download every file in the build folder, so **never use the project root (`.`) as the build folder**. For a static-HTML prototype with no build step, copy only the files the page loads (HTML, CSS, JS, images) into a `dist/` folder and use that. Keep evidence notes, transcripts, `.env` and other project files out of it.
 - Map the screens/routes and the interactive elements a tester would use.
 - If `validai-flows.json` exists, read it first. You're updating, not starting over.
 
@@ -56,7 +57,7 @@ Keep flows to 3–7 steps, and ask sparingly. Wait for the PM's "yes" (or edits)
 
 ## 5. Verify and hand off
 
-Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.10.1" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
+Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.10.2" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
 
 Then choose the hand-off:
 
@@ -65,6 +66,8 @@ Then choose the hand-off:
 ```
 node ${CLAUDE_SKILL_DIR}/scripts/validai-share.mjs --flows validai-flows.json [build-dir]
 ```
+
+`[build-dir]` is the build output folder from step 1 (e.g. `dist`), never `.`. The helper always leaves out hidden files (`.env`, `.git/`), `node_modules/`, `.validai` packages, keys and source maps, and refuses a folder that looks like the project root. Don't pass `--allow-root` unless the PM confirms that folder holds only what testers should load.
 
 This validates the file, checks that every tag exists in the build, uploads a new version, and imports the flows. If the upload succeeded but the import failed, fix the file and run `node ${CLAUDE_SKILL_DIR}/scripts/validai-share.mjs --flows-only`.
 

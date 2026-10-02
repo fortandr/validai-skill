@@ -2,7 +2,7 @@
 
 Prepare a prototype for user validation in [ValidAI](https://validai.lukantan.com): recommend Task Flows from your goals and validation evidence, tag click targets, then push to ValidAI or package a `.validai` file.
 
-Current version: **2026.10.1**. This repository is generated from ValidAI on every release. Don't open pull requests here.
+Current version: **2026.10.2**. This repository is generated from ValidAI on every release. Don't open pull requests here.
 
 ## Claude Code
 

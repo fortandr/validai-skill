@@ -60,28 +60,61 @@ import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync3, 
 import { join as join3, relative, sep } from "node:path";
 var MAX_FILE = 10 * 1024 * 1024;
 var MAX_TOTAL = 50 * 1024 * 1024;
-function resolveBundleDir(explicit, cwd) {
-  if (explicit) {
-    const dir = join3(cwd, explicit);
-    if (!existsSync2(dir) || !statSync(dir).isDirectory()) throw new Error(`Directory not found: ${explicit}`);
-    return dir;
-  }
-  for (const candidate of ["dist", "build", "out"]) {
-    const dir = join3(cwd, candidate);
-    if (existsSync2(dir) && statSync(dir).isDirectory()) return dir;
-  }
-  throw new Error("No build output found (looked for dist/, build/, out/). Build your prototype first, or pass a directory.");
+function isDir(path) {
+  return existsSync2(path) && statSync(path).isDirectory();
 }
-function walk(dir, base, acc) {
+function looksLikeProjectRoot(dir) {
+  if (existsSync2(join3(dir, "validai-flows.json")) || existsSync2(join3(dir, ".validai.json"))) return true;
+  if (!existsSync2(join3(dir, "package.json")) || !isDir(join3(dir, "src"))) return false;
+  const index = join3(dir, "index.html");
+  if (!existsSync2(index)) return true;
+  const html = readFileSync3(index, "utf-8");
+  return /\bsrc\s*=\s*["']?\/?src\//i.test(html) || /\bsrc\s*=\s*["']?[^"'\s>]+\.(?:tsx?|jsx|mts)(?:[?#"'\s>]|$)/i.test(html);
+}
+function resolveBundleDir(explicit, cwd, opts = {}) {
+  let dir;
+  if (explicit) {
+    dir = join3(cwd, explicit);
+    if (!isDir(dir)) throw new Error(`Directory not found: ${explicit}`);
+  } else {
+    dir = ["dist", "build", "out"].map((c) => join3(cwd, c)).find(isDir);
+    if (!dir) {
+      throw new Error("No build output found (looked for dist/, build/, out/). Build your prototype first, or pass a directory.");
+    }
+  }
+  if (!opts.allowRoot && looksLikeProjectRoot(dir)) {
+    throw new Error(
+      `${explicit ?? relative(cwd, dir)} looks like your project folder, not its build output (it has validai-flows.json/.validai.json, or package.json and src/ but no built index.html), and testers can download every file in the bundle. Build the prototype (e.g. \`npm run build\`) and pass the output folder (usually dist/); for a static prototype, copy only the files the page loads into dist/. If this folder really holds only what testers should load, pass --allow-root.`
+    );
+  }
+  return dir;
+}
+var HELPER_FILES = /* @__PURE__ */ new Set(["validai-flows.json", "validai-share.mjs", "AGENTS.md"]);
+function excludedDir(name) {
+  return name.startsWith(".") && name !== ".well-known" || name === "node_modules";
+}
+function excludedFile(name, allowSourceMaps) {
+  if (name.startsWith(".")) return true;
+  if (/\.(?:validai|pem|key)$/i.test(name)) return true;
+  if (!allowSourceMaps && /\.map$/i.test(name)) return true;
+  return HELPER_FILES.has(name);
+}
+function walk(dir, base, acc, skipped, allowSourceMaps) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join3(dir, entry.name);
-    if (entry.isDirectory()) walk(full, base, acc);
-    else if (entry.isFile()) acc.push(full);
+    const rel = relative(base, full).split(sep).join("/");
+    if (entry.isDirectory()) {
+      if (excludedDir(entry.name)) skipped.push(`${rel}/`);
+      else walk(full, base, acc, skipped, allowSourceMaps);
+    } else if (entry.isFile()) {
+      if (excludedFile(entry.name, allowSourceMaps)) skipped.push(rel);
+      else acc.push(full);
+    }
   }
 }
-function collectBundle(dir) {
+function collectBundle(dir, opts = {}) {
   const absFiles = [];
-  walk(dir, dir, absFiles);
+  walk(dir, dir, absFiles, opts.skipped ?? [], opts.allowSourceMaps === true);
   const files = [];
   let total = 0;
   for (const abs of absFiles) {
@@ -101,9 +134,15 @@ function collectBundle(dir) {
   }
   return files;
 }
+function describeSkipped(skipped) {
+  if (skipped.length === 0) return null;
+  const shown = skipped.slice(0, 8).join(", ");
+  const more = skipped.length > 8 ? `, \u2026 (+${skipped.length - 8} more)` : "";
+  return `Left out ${skipped.length} ${skipped.length === 1 ? "file" : "files/folders"} (hidden, secrets, packages, source maps, ValidAI files): ${shown}${more}`;
+}
 
 // cli/src/version.ts
-var HELPER_VERSION = true ? "2026.10.1" : "dev";
+var HELPER_VERSION = true ? "2026.10.2" : "dev";
 var CLIENT_HEADER = { "X-ValidAI-Client": `validai-share/${HELPER_VERSION}` };
 
 // cli/src/api.ts
@@ -1394,11 +1433,25 @@ function parseArgs(argv) {
       out.flowsOnly = true;
     } else if (command === "pack" && a === "--out") {
       out.out = rest[++i2];
+    } else if (!isLogin && a === "--allow-root") {
+      out.allowRoot = true;
+    } else if (!isLogin && a === "--include-source-maps") {
+      out.includeSourceMaps = true;
     } else if (!isLogin && !a.startsWith("--") && out.dir === void 0) {
       out.dir = a;
     }
   }
   return out;
+}
+function collectFor(args, cwd) {
+  const skipped = [];
+  const files = collectBundle(resolveBundleDir(args.dir, cwd, { allowRoot: args.allowRoot }), {
+    allowSourceMaps: args.includeSourceMaps,
+    skipped
+  });
+  const note = describeSkipped(skipped);
+  if (note) console.log(note);
+  return files;
 }
 function defaultName(cwd) {
   try {
@@ -1446,7 +1499,7 @@ async function run(argv, localUpdate) {
   if (args.command === "pack") {
     let files2;
     try {
-      files2 = collectBundle(resolveBundleDir(args.dir, cwd));
+      files2 = collectFor(args, cwd);
     } catch (err2) {
       console.error(`\u2717 ${err2.message}`);
       return 1;
@@ -1470,7 +1523,7 @@ async function run(argv, localUpdate) {
   let files = null;
   if (!args.flowsOnly) {
     try {
-      files = collectBundle(resolveBundleDir(args.dir, cwd));
+      files = collectFor(args, cwd);
     } catch (err2) {
       console.error(`\u2717 ${err2.message}`);
       return 1;
