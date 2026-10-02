@@ -58,6 +58,75 @@ function writeProjectRef(cwd, ref) {
 // cli/src/bundle.ts
 import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync3, statSync } from "node:fs";
 import { join as join3, relative, sep } from "node:path";
+
+// src/shared/pathToken.ts
+function isReservedBundlePath(relPath) {
+  return relPath.split("/").some((seg) => seg.startsWith("~"));
+}
+
+// src/shared/rootAbsoluteRefs.ts
+var MAX_LISTED = 5;
+var TAG = /<([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+var URL_ATTR = /(?<![\w:-])(src|href|poster|srcset|style)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
+var NAVIGATION_TAGS = /* @__PURE__ */ new Set(["a", "base"]);
+var CSS_URL = /url\(\s*(["']?)([^"')]*?)\1\s*\)/gi;
+var CSS_IMPORT_STRING = /@import\s+(["'])([^"']*)\1/gi;
+var isRootAbsolute = (value) => value.startsWith("/") && !value.startsWith("//");
+function findRootAbsoluteCssRefs(css) {
+  const text = css.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, " ");
+  const found = [];
+  for (const re of [CSS_URL, CSS_IMPORT_STRING]) {
+    for (const m of text.matchAll(re)) {
+      const ref = m[2].trim();
+      if (isRootAbsolute(ref)) found.push({ at: m.index ?? 0, ref });
+    }
+  }
+  found.sort((a, b) => a.at - b.at);
+  return [...new Set(found.map((f) => f.ref))];
+}
+function srcsetUrls(srcset) {
+  return srcset.split(/,(?=\s|\/|\.|[a-zA-Z])/).map((candidate) => candidate.trim().split(/\s+/)[0]).filter(Boolean);
+}
+function findRootAbsoluteRefs(html) {
+  const found = /* @__PURE__ */ new Set();
+  const add = (ref) => {
+    if (isRootAbsolute(ref)) found.add(ref);
+  };
+  const text = html.replace(/<!--[\s\S]*?(?:-->|$)/g, " ").replace(/(<script\b(?:[^>"']|"[^"]*"|'[^']*')*>)[\s\S]*?(?:<\/script\s*>|$)/gi, "$1");
+  for (const tag of text.matchAll(TAG)) {
+    const name = tag[1].toLowerCase();
+    for (const attr of tag[2].matchAll(URL_ATTR)) {
+      const attrName = attr[1].toLowerCase();
+      const value = attr[2] ?? attr[3] ?? attr[4] ?? "";
+      if (attrName === "href" && NAVIGATION_TAGS.has(name)) continue;
+      if (attrName === "srcset") srcsetUrls(value).forEach(add);
+      else if (attrName === "style") findRootAbsoluteCssRefs(value).forEach(add);
+      else add(value.trim());
+    }
+    if (name === "style") {
+      const from = (tag.index ?? 0) + tag[0].length;
+      const close = text.slice(from).search(/<\/style\s*>/i);
+      findRootAbsoluteCssRefs(close === -1 ? text.slice(from) : text.slice(from, from + close)).forEach(add);
+    }
+  }
+  return [...found];
+}
+function bundleRootAbsoluteWarning(files) {
+  const scanned = [
+    ...files.filter((f) => f.path === "index.html").map((f) => ({ path: f.path, refs: findRootAbsoluteRefs(f.text) })),
+    ...files.filter((f) => /\.css$/i.test(f.path)).sort((a, b) => a.path.localeCompare(b.path)).map((f) => ({ path: f.path, refs: findRootAbsoluteCssRefs(f.text) }))
+  ].filter((s) => s.refs.length > 0);
+  if (scanned.length === 0) return null;
+  const refs = [...new Set(scanned.flatMap((s) => s.refs))];
+  const shown = refs.slice(0, MAX_LISTED).join(", ");
+  const more = refs.length > MAX_LISTED ? ` (+${refs.length - MAX_LISTED} more)` : "";
+  const sources = scanned.map((s) => s.path);
+  const shownSources = sources.length <= 3 ? sources.join(sources.length === 2 ? " and " : ", ") : `${sources.slice(0, 2).join(", ")} and ${sources.length - 2} more files`;
+  const verb = sources.length === 1 ? "loads" : "load";
+  return `${shownSources} ${verb} ${shown}${more} from the site root; root-absolute paths don't load in ValidAI. Use relative paths (for Vite, set base: './' and rebuild).`;
+}
+
+// cli/src/bundle.ts
 var MAX_FILE = 10 * 1024 * 1024;
 var MAX_TOTAL = 50 * 1024 * 1024;
 function isDir(path) {
@@ -119,6 +188,9 @@ function collectBundle(dir, opts = {}) {
   let total = 0;
   for (const abs of absFiles) {
     const rel = relative(dir, abs).split(sep).join("/");
+    if (isReservedBundlePath(rel)) {
+      throw new Error(`${rel}: names starting with "~" are reserved by ValidAI; rename it before uploading.`);
+    }
     const size = statSync(abs).size;
     if (size > MAX_FILE) {
       throw new Error(`File exceeds the 10 MB limit: ${rel}`);
@@ -140,9 +212,14 @@ function describeSkipped(skipped) {
   const more = skipped.length > 8 ? `, \u2026 (+${skipped.length - 8} more)` : "";
   return `Left out ${skipped.length} ${skipped.length === 1 ? "file" : "files/folders"} (hidden, secrets, packages, source maps, ValidAI files): ${shown}${more}`;
 }
+function describeRootAbsolute(files) {
+  return bundleRootAbsoluteWarning(
+    files.filter((f) => f.path === "index.html" || /\.css$/i.test(f.path)).map((f) => ({ path: f.path, text: Buffer.from(f.contentBase64, "base64").toString("utf-8") }))
+  );
+}
 
 // cli/src/version.ts
-var HELPER_VERSION = true ? "2026.10.2" : "dev";
+var HELPER_VERSION = true ? "2026.10.2-2" : "dev";
 var CLIENT_HEADER = { "X-ValidAI-Client": `validai-share/${HELPER_VERSION}` };
 
 // cli/src/api.ts
@@ -1451,6 +1528,8 @@ function collectFor(args, cwd) {
   });
   const note = describeSkipped(skipped);
   if (note) console.log(note);
+  const rootNote = describeRootAbsolute(files);
+  if (rootNote) console.log(`\u26A0 ${rootNote}`);
   return files;
 }
 function defaultName(cwd) {

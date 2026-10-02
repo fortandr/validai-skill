@@ -2,14 +2,14 @@
 name: validai
 description: Prepare a prototype for user validation in ValidAI — read the prototype, recommend Task Flows from the PM's goals and validation evidence (in-person notes, transcripts, PRD), tag click targets with data-validai-target, then push to ValidAI or package a .validai file. Use when the user mentions ValidAI, wants to test or validate a prototype with users, or wants task flows created.
 metadata:
-  version: "2026.10.2"
+  version: "2026.10.2-2"
 ---
 
 # ValidAI: prepare a prototype for validation
 
 Use this when a PM wants to test a prototype in ValidAI: upload it, turn their goals and validation evidence into recommended **Task Flows**, and make testers' clicks register reliably.
 
-ValidAI app: https://validai.lukantan.com · Skill version: 2026.10.2
+ValidAI app: https://validai.lukantan.com · Skill version: 2026.10.2-2
 
 ## Ground rules
 
@@ -57,7 +57,7 @@ Keep flows to 3–7 steps, and ask sparingly. Wait for the PM's "yes" (or edits)
 
 ## 5. Verify and hand off
 
-Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.10.2" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
+Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.10.2-2" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
 
 Then choose the hand-off:
 

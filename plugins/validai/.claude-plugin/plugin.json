@@ -1,6 +1,6 @@
 {
   "name": "validai",
-  "version": "2026.10.2",
+  "version": "2026.10.2-2",
   "description": "Prepare a prototype for user validation in ValidAI: recommend Task Flows from your goals and evidence, tag click targets, then push or package a .validai file.",
   "homepage": "https://validai.lukantan.com"
 }
