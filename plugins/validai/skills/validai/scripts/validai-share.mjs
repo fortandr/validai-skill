@@ -219,7 +219,7 @@ function describeRootAbsolute(files) {
 }
 
 // cli/src/version.ts
-var HELPER_VERSION = true ? "2026.10.2-2" : "dev";
+var HELPER_VERSION = true ? "2026.11.2" : "dev";
 var CLIENT_HEADER = { "X-ValidAI-Client": `validai-share/${HELPER_VERSION}` };
 
 // cli/src/api.ts
@@ -300,6 +300,8 @@ var LIMITS = {
   completionMessage: 200,
   question: 500,
   rationale: 1e3,
+  testTitle: 120,
+  testIntro: 2e3,
   notes: 500,
   builtWith: 60,
   generatorName: 40,
@@ -309,7 +311,7 @@ var COMPLETION_TYPES = ["interaction", "appearance", "checklist", "self-report"]
 var RESPONSE_TYPES = ["scale", "choice", "reaction", "text"];
 var SOURCE_KINDS = ["in-person-validation", "transcript", "prd", "prototype-analysis", "other"];
 var TOP_KEYS = ["schemaVersion", "prototype", "generator", "source", "taskFlows"];
-var FLOW_KEYS = ["key", "name", "description", "rationale", "steps", "endIntercepts"];
+var FLOW_KEYS = ["key", "name", "description", "rationale", "testTitle", "testIntro", "steps", "endIntercepts"];
 var STEP_KEYS = ["key", "instruction", "completionMessage", "completionType", "target", "targets", "threshold", "intercept"];
 var TARGET_KEYS = ["tag", "label", "context"];
 var INTERCEPT_KEYS = ["trigger", "question", "responseType", "choices", "escalateOnLowScore", "followUpQuestion"];
@@ -471,6 +473,8 @@ function validateManifest(raw) {
     text(f, "name", path, LIMITS.name, true);
     text(f, "description", path, Infinity, false);
     text(f, "rationale", path, LIMITS.rationale, false);
+    text(f, "testTitle", path, LIMITS.testTitle, false);
+    text(f, "testIntro", path, LIMITS.testIntro, false);
     const sp = join4(path, "steps");
     if (!Array.isArray(f.steps) || f.steps.length === 0) {
       err2("empty-list", sp, "needs at least 1 step");

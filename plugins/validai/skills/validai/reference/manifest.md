@@ -10,6 +10,8 @@
     "name": "Checkout happy path",
     "description": "Buy a ticket as a returning donor",
     "rationale": "3 of 5 in-person participants stalled at fee cover",
+    "testTitle": "Buying event tickets",           // tester-facing; heads the invite link
+    "testIntro": "Thanks for helping us test our new ticketing site. You'll buy a ticket to an upcoming gala. There are no wrong answers, so please think aloud as you go.",
     "steps": [{
       "key": "choose-ticket",
       "instruction": "Pick a General Admission ticket",
@@ -27,6 +29,7 @@
 - `prototype.builtWith` is the AI assistant you're running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex"), ≤ 60 characters. ValidAI shows it as the prototype's "Built with" label.
 - `generator` says what wrote the file: `{ "name": "validai-skill", "version": "<this skill's version>" }` (the version is printed in the skill's instructions). The helper's `pack` adds `{ "name": "validai-share", … }` when it's missing. ValidAI uses it to tell the PM when the skill is out of date. Both fields are optional strings ≤ 40 characters; other names are allowed.
 - `source.kind`: `in-person-validation`, `transcript`, `prd`, `prototype-analysis`, or `other`. `source.notes` ≤ 500 characters.
+- `testTitle` and `testIntro` (both optional) are what testers see on the invite link before they start: a friendly test name and a short intro (what the app is for and the task, with no hints). When the PM creates an invite with this flow, ValidAI fills the invite's title and intro from them. Without a `testTitle`, testers see a readable form of the prototype name.
 - `completionType` defaults to `interaction` when omitted.
 - `completionMessage` (optional, ≤ 200 characters) is shown to the tester the moment the step completes, right before the ease rating. Write one neutral sentence, in the tester's terms, saying what they just found or did. No praise ("Great job!"), because praise right before a rating inflates it, and no hints about later steps. If you leave it out, the tester sees "Step complete — <first sentence of the instruction>" ("Marked done" on self-report steps).
 - `target.tag` is the element's `data-validai-target` value. `label` is its visible text, and `context` is text around it (for example, the section heading). Give a tag whenever you can: it's matched first, and it survives copy changes.
@@ -49,7 +52,7 @@ Every error names a JSON path, e.g. `taskFlows[1].steps[3].target.tag "Pay-Now":
 | `duplicate-key` | Flow keys are unique in the file; step keys are unique within their flow. |
 | `empty-list` | At least 1 task flow, and at least 1 step per flow. |
 | `too-many` | At most 50 task flows, and at most 100 steps per flow. |
-| `too-long` | `name` ≤ 120, `instruction` ≤ 500, `completionMessage` ≤ 200, intercept `question`/`followUpQuestion` ≤ 500, `rationale` ≤ 1000, `source.notes` ≤ 500, `prototype.builtWith` ≤ 60, `generator.name`/`generator.version` ≤ 40 characters. |
+| `too-long` | `name` ≤ 120, `instruction` ≤ 500, `completionMessage` ≤ 200, intercept `question`/`followUpQuestion` ≤ 500, `rationale` ≤ 1000, `testTitle` ≤ 120, `testIntro` ≤ 2000, `source.notes` ≤ 500, `prototype.builtWith` ≤ 60, `generator.name`/`generator.version` ≤ 40 characters. |
 | `completion-type` | `completionType` must be `interaction`, `appearance`, `checklist` or `self-report`. |
 | `target-required` | `interaction`/`appearance` need `target`; `checklist` needs ≥ 1 `targets`; every target needs a `tag` or a `label`. |
 | `target-forbidden` | `interaction`/`appearance` can't have `targets`/`threshold`; `checklist` can't have `target`; `self-report` can't have any of them. |
