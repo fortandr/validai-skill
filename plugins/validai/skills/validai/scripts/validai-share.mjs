@@ -219,7 +219,7 @@ function describeRootAbsolute(files) {
 }
 
 // cli/src/version.ts
-var HELPER_VERSION = true ? "2026.11.2" : "dev";
+var HELPER_VERSION = true ? "2026.11.5" : "dev";
 var CLIENT_HEADER = { "X-ValidAI-Client": `validai-share/${HELPER_VERSION}` };
 
 // cli/src/api.ts
@@ -298,6 +298,7 @@ var LIMITS = {
   name: 120,
   instruction: 500,
   completionMessage: 200,
+  hint: 300,
   question: 500,
   rationale: 1e3,
   testTitle: 120,
@@ -312,7 +313,7 @@ var RESPONSE_TYPES = ["scale", "choice", "reaction", "text"];
 var SOURCE_KINDS = ["in-person-validation", "transcript", "prd", "prototype-analysis", "other"];
 var TOP_KEYS = ["schemaVersion", "prototype", "generator", "source", "taskFlows"];
 var FLOW_KEYS = ["key", "name", "description", "rationale", "testTitle", "testIntro", "steps", "endIntercepts"];
-var STEP_KEYS = ["key", "instruction", "completionMessage", "completionType", "target", "targets", "threshold", "intercept"];
+var STEP_KEYS = ["key", "instruction", "completionMessage", "hint", "completionType", "target", "targets", "threshold", "intercept"];
 var TARGET_KEYS = ["tag", "label", "context"];
 var INTERCEPT_KEYS = ["trigger", "question", "responseType", "choices", "escalateOnLowScore", "followUpQuestion"];
 var isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -430,6 +431,7 @@ function validateManifest(raw) {
     const k = key(s, "key", path, false);
     text(s, "instruction", path, LIMITS.instruction, true);
     text(s, "completionMessage", path, LIMITS.completionMessage, false);
+    text(s, "hint", path, LIMITS.hint, false);
     const type = s.completionType ?? "interaction";
     if (!COMPLETION_TYPES.includes(type)) {
       err2("completion-type", join4(path, "completionType"), `must be one of ${COMPLETION_TYPES.join(", ")}`);

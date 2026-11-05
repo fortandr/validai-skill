@@ -2,14 +2,14 @@
 name: validai
 description: Prepare a prototype for user validation in ValidAI — read the prototype, recommend Task Flows from the PM's goals and validation evidence (in-person notes, transcripts, PRD), tag click targets with data-validai-target, then push to ValidAI or package a .validai file. Use when the user mentions ValidAI, wants to test or validate a prototype with users, or wants task flows created.
 metadata:
-  version: "2026.11.2"
+  version: "2026.11.5"
 ---
 
 # ValidAI: prepare a prototype for validation
 
 Use this when a PM wants to test a prototype in ValidAI: upload it, turn their goals and validation evidence into recommended **Task Flows**, and make testers' clicks register reliably.
 
-ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.2
+ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.5
 
 ## Ground rules
 
@@ -38,6 +38,7 @@ For each recommended flow, show the PM:
 - a name, a one-line description (the goal), and a `rationale` that quotes the evidence
 - what testers see before they start: a `testTitle`, a short, friendly name for the test in plain words (e.g. "Buying event tickets", never a repo or file name like `checkoutFlow_v3`; ≤ 120 characters), and a `testIntro`, 2–4 short sentences that thank the tester, say what the app is for, and describe the task without hinting at how to do it, ending with an invitation to think aloud (≤ 2000 characters). ValidAI uses them as the title and intro on the invite link, and the PM can edit both there
 - the steps. For each: the instruction (what the tester is asked to do, in the tester's words, with no UI hints that give the answer away), a completion type, a target, and a `completionMessage`: one neutral sentence, in the tester's terms, saying what they just found or did (e.g. "You found the inventory summary showing the auction is light."). It's shown right before the ease rating, so no praise ("Great job!") and no hints about later steps; ≤ 200 characters
+- a `hint` for any step whose target isn't on the screen the tester is on when the step begins (they have to navigate to find it): one sentence pointing to the area, not the exact control (e.g. "Organization-wide options live under Settings in the left menu."); ≤ 300 characters. Testers see it only if they ask, and ValidAI records who did
 - an optional question after one step (`intercept`) and 1–2 session-end questions (`endIntercepts`)
 
 | Completion type | Use when | Needs |
@@ -46,6 +47,8 @@ For each recommended flow, show the PM:
 | `appearance` | the step ends when something shows up (confirmation, result) | `target`: the element that appears |
 | `checklist` | any N of several elements count | `targets` (+ optional `threshold`) |
 | `self-report` | nothing clickable proves it (reading, judging) | nothing |
+
+Word each instruction for what that step tests. Most steps are plain tasks ("Change the fiscal year to start in January."). Only when the step is about *finding* something the tester can't see yet, a question about where to go can fit ("Where would you go to change your fiscal year? Go there now."). Don't use that form by default. Either way, if the target isn't on screen when the step begins, give the step a `hint`, because a tester who can't find it skips the step and often can't do the steps after it.
 
 Keep flows to 3–7 steps, and ask sparingly. Wait for the PM's "yes" (or edits) before drafting the next flow.
 
@@ -58,7 +61,7 @@ Keep flows to 3–7 steps, and ask sparingly. Wait for the PM's "yes" (or edits)
 
 ## 5. Verify and hand off
 
-Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.2" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
+Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.5" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
 
 Then choose the hand-off:
 

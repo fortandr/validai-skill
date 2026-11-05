@@ -16,6 +16,7 @@
       "key": "choose-ticket",
       "instruction": "Pick a General Admission ticket",
       "completionMessage": "You picked a General Admission ticket.", // optional; shown when the step completes
+      "hint": "Tickets are listed on the event page.",  // optional; revealed only if the tester asks
       "completionType": "interaction",              // interaction | appearance | checklist | self-report
       "target": { "tag": "ticket-ga", "label": "General Admission", "context": "Tickets" },
       "intercept": { "trigger": "step-complete", "question": "How easy was that?", "responseType": "scale", "escalateOnLowScore": true }
@@ -32,6 +33,7 @@
 - `testTitle` and `testIntro` (both optional) are what testers see on the invite link before they start: a friendly test name and a short intro (what the app is for and the task, with no hints). When the PM creates an invite with this flow, ValidAI fills the invite's title and intro from them. Without a `testTitle`, testers see a readable form of the prototype name.
 - `completionType` defaults to `interaction` when omitted.
 - `completionMessage` (optional, ≤ 200 characters) is shown to the tester the moment the step completes, right before the ease rating. Write one neutral sentence, in the tester's terms, saying what they just found or did. No praise ("Great job!"), because praise right before a rating inflates it, and no hints about later steps. If you leave it out, the tester sees "Step complete — <first sentence of the instruction>" ("Marked done" on self-report steps).
+- `hint` (optional, ≤ 300 characters) stays hidden until the tester taps "Need a hint?" on the task card. ValidAI records which testers used it, so results separate finding it unaided from finding it with help. Point to the area ("It's under Settings in the left menu"), not the exact control, and never give away later steps.
 - `target.tag` is the element's `data-validai-target` value. `label` is its visible text, and `context` is text around it (for example, the section heading). Give a tag whenever you can: it's matched first, and it survives copy changes.
 - Checklist steps use `"targets": [{…}, …]` and `"threshold": N` (default: all targets).
 - `intercept` / `endIntercepts[]`: `responseType` is `scale` (1–5), `choice` (needs `choices`), `reaction`, or `text`. `escalateOnLowScore` applies to `scale` only and asks `followUpQuestion` after a low score.
@@ -52,7 +54,7 @@ Every error names a JSON path, e.g. `taskFlows[1].steps[3].target.tag "Pay-Now":
 | `duplicate-key` | Flow keys are unique in the file; step keys are unique within their flow. |
 | `empty-list` | At least 1 task flow, and at least 1 step per flow. |
 | `too-many` | At most 50 task flows, and at most 100 steps per flow. |
-| `too-long` | `name` ≤ 120, `instruction` ≤ 500, `completionMessage` ≤ 200, intercept `question`/`followUpQuestion` ≤ 500, `rationale` ≤ 1000, `testTitle` ≤ 120, `testIntro` ≤ 2000, `source.notes` ≤ 500, `prototype.builtWith` ≤ 60, `generator.name`/`generator.version` ≤ 40 characters. |
+| `too-long` | `name` ≤ 120, `instruction` ≤ 500, `completionMessage` ≤ 200, `hint` ≤ 300, intercept `question`/`followUpQuestion` ≤ 500, `rationale` ≤ 1000, `testTitle` ≤ 120, `testIntro` ≤ 2000, `source.notes` ≤ 500, `prototype.builtWith` ≤ 60, `generator.name`/`generator.version` ≤ 40 characters. |
 | `completion-type` | `completionType` must be `interaction`, `appearance`, `checklist` or `self-report`. |
 | `target-required` | `interaction`/`appearance` need `target`; `checklist` needs ≥ 1 `targets`; every target needs a `tag` or a `label`. |
 | `target-forbidden` | `interaction`/`appearance` can't have `targets`/`threshold`; `checklist` can't have `target`; `self-report` can't have any of them. |
