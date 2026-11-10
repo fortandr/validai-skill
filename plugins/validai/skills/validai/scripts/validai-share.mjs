@@ -4,7 +4,7 @@
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { basename, join as join5, resolve as resolve2 } from "node:path";
-import { readFileSync as readFileSync5, realpathSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync5, realpathSync, writeFileSync as writeFileSync3 } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // cli/src/config.ts
@@ -219,7 +219,7 @@ function describeRootAbsolute(files) {
 }
 
 // cli/src/version.ts
-var HELPER_VERSION = true ? "2026.11.5" : "dev";
+var HELPER_VERSION = true ? "2026.11.10" : "dev";
 var CLIENT_HEADER = { "X-ValidAI-Client": `validai-share/${HELPER_VERSION}` };
 
 // cli/src/api.ts
@@ -279,6 +279,24 @@ async function importFlows(baseUrl, token, prototypeId, manifestText, dryRun = f
     const { message, warnings, skillNotice } = await errorBody(res);
     throw new ImportError(message, warnings, skillNotice);
   }
+  return await res.json();
+}
+async function exportAnalysis(baseUrl, token, body) {
+  const res = await fetch(`${baseUrl}/__api/analysis/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...CLIENT_HEADER },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return await res.json();
+}
+async function importAnalysis(baseUrl, token, answer) {
+  const res = await fetch(`${baseUrl}/__api/analysis/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...CLIENT_HEADER },
+    body: answer
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
   return await res.json();
 }
 
@@ -1496,6 +1514,7 @@ async function checkForUpdateInfo(appUrl, current, scriptPath, fetchImpl = fetch
 
 // cli/src/index.ts
 function parseArgs(argv) {
+  if (argv[0] === "analysis") return parseAnalysisArgs(argv.slice(1));
   const command = argv[0] === "login" ? "login" : argv[0] === "pack" ? "pack" : "share";
   const out = { command };
   const rest = command === "share" ? argv : argv.slice(1);
@@ -1525,6 +1544,72 @@ function parseArgs(argv) {
     }
   }
   return out;
+}
+var ANALYSIS_USAGE = "Usage: validai-share analysis export [--flow <taskFlowId>] [--kind flow|sessions|all] [--out <dir>]\n       validai-share analysis import <answer.json>";
+function parseAnalysisArgs(rest) {
+  const action = rest[0];
+  const out = { command: "analysis" };
+  if (action !== "export" && action !== "import") {
+    out.error = ANALYSIS_USAGE;
+    return out;
+  }
+  out.analysisAction = action;
+  for (let i2 = 1; i2 < rest.length; i2 += 1) {
+    const a = rest[i2];
+    if (a === "--url") {
+      out.url = rest[++i2];
+    } else if (action === "export" && a === "--flow") {
+      out.flow = rest[++i2];
+    } else if (action === "export" && a === "--out") {
+      out.out = rest[++i2];
+    } else if (action === "export" && a === "--kind") {
+      const k = rest[++i2];
+      if (k === "flow" || k === "sessions" || k === "all") out.kind = k;
+      else out.error = "--kind must be flow, sessions or all";
+    } else if (action === "import" && !a.startsWith("--") && out.dir === void 0) {
+      out.dir = a;
+    } else {
+      out.error = `Unknown option ${a}
+${ANALYSIS_USAGE}`;
+    }
+  }
+  if (action === "import" && !out.dir && !out.error) out.error = `analysis import needs the answer file
+${ANALYSIS_USAGE}`;
+  return out;
+}
+async function runAnalysis(args, cwd, appUrl, token) {
+  try {
+    if (args.analysisAction === "import") {
+      const r = await importAnalysis(appUrl, token, readFileSync5(resolve2(cwd, args.dir), "utf-8"));
+      if (r.kind === "flow") {
+        console.log(`\u2713 Imported ${r.patterns} pattern${r.patterns === 1 ? "" : "s"} across sessions`);
+      } else {
+        console.log(`\u2713 Imported ${r.saved} session analys${r.saved === 1 ? "is" : "es"}`);
+        for (const p of r.problems) console.log(`\u26A0 ${p}`);
+      }
+      console.log(`\u2192 ${appUrl}/prototypes/${r.prototypeId}/insights`);
+      return 0;
+    }
+    const ref = readProjectRef(cwd);
+    if (!ref) {
+      console.error("\u2717 No prototype in this folder (.validai.json). Run this where you ran validai-share, or share the prototype first.");
+      return 1;
+    }
+    const { files, skipped } = await exportAnalysis(appUrl, token, { prototypeId: ref.prototypeId, taskFlowId: args.flow, kind: args.kind ?? "all" });
+    const dir = resolve2(cwd, args.out ?? "validai-analysis");
+    if (files.length) mkdirSync2(dir, { recursive: true });
+    for (const f of files) {
+      writeFileSync3(join5(dir, basename(f.filename)), f.markdown);
+      console.log(`\u2713 Wrote ${join5(args.out ?? "validai-analysis", basename(f.filename))} (${f.kind === "flow" ? "patterns across sessions" : "one analysis per session"})`);
+    }
+    for (const s of skipped) console.log(`\xB7 ${s}`);
+    if (!files.length) return 0;
+    console.log("Next: follow each file's instructions, save the JSON answer, then run `validai-share analysis import <answer.json>`.");
+    return 0;
+  } catch (err2) {
+    console.error(`\u2717 ${err2.message}`);
+    return 1;
+  }
 }
 function collectFor(args, cwd) {
   const skipped = [];
@@ -1571,6 +1656,14 @@ async function run(argv, localUpdate) {
     saveConfig(token2, url, home);
     console.log("Saved to ~/.validai/config.json");
     return 0;
+  }
+  if (args.command === "analysis") {
+    const { token: token2, appUrl: appUrl2 } = loadConfig(args, process.env, home);
+    if (!token2) {
+      console.error("No CLI token. Generate one in ValidAI \u2192 Settings \u2192 CLI token, then run `validai-share login` (or set VALIDAI_TOKEN).");
+      return 1;
+    }
+    return runAnalysis(args, cwd, appUrl2, token2);
   }
   let flows = null;
   if (args.flows || args.flowsOnly || args.command === "pack") {
