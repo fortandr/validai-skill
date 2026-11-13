@@ -219,7 +219,7 @@ function describeRootAbsolute(files) {
 }
 
 // cli/src/version.ts
-var HELPER_VERSION = true ? "2026.11.13" : "dev";
+var HELPER_VERSION = true ? "2026.11.13-2" : "dev";
 var CLIENT_HEADER = { "X-ValidAI-Client": `validai-share/${HELPER_VERSION}` };
 
 // cli/src/api.ts
@@ -728,18 +728,17 @@ async function runShare(files, flows, api, out, localUpdate) {
   }
   for (const w of flows?.warnings ?? []) out.log(`  \u26A0 ${w}`);
   const it = flows?.manifest.iteration;
+  let uploaded = null;
   if (files && it) {
     const result = await api.ingest(files, { changes: it.changes, findingIds: it.addressedFindings ?? [] });
+    uploaded = `iteration v${result.iteration ?? "?"}`;
     const n = it.addressedFindings?.length ?? 0;
     out.log(`\u2713 Started iteration v${result.iteration ?? "?"}${n ? `, addressing ${n} finding${n === 1 ? "" : "s"}` : ""}`);
     for (const w of result.warnings) out.log(`  \u26A0 ${w}`);
-    out.log("  Task flows were kept as they are. If you changed their steps, run: validai-share --flows-only");
-    return 0;
   }
-  let version = null;
-  if (files) {
+  if (files && !it) {
     const result = await api.ingest(files);
-    version = result.version;
+    uploaded = `v${result.version}`;
     out.log(`\u2713 Uploaded v${result.version}`);
     for (const w of result.warnings) out.log(`  \u26A0 ${w}`);
   }
@@ -756,8 +755,8 @@ async function runShare(files, flows, api, out, localUpdate) {
     const failure = err2;
     for (const w of failure.warnings ?? []) if (w !== failure.skillNotice?.message) out.error(`  \u26A0 ${w}`);
     await printServerNotice(failure.skillNotice, out, localUpdate);
-    if (version !== null) {
-      out.error(`  The upload (v${version}) succeeded. Fix the flows file, then re-run: validai-share --flows-only`);
+    if (uploaded !== null) {
+      out.error(`  The upload (${uploaded}) succeeded. Fix the flows file, then re-run: validai-share --flows-only`);
     }
     return 1;
   }
@@ -1775,8 +1774,7 @@ async function run(argv, localUpdate) {
       console,
       localUpdate
     );
-    const toFlows = flows && !(files && flows.manifest.iteration);
-    if (code === 0) console.log(`\u2192 ${appUrl}/prototypes/${prototypeId}${toFlows ? "/task-flows" : ""}`);
+    if (code === 0) console.log(`\u2192 ${appUrl}/prototypes/${prototypeId}${flows ? "/task-flows" : ""}`);
     return code;
   } catch (err2) {
     console.error(`\u2717 ${err2.message}`);

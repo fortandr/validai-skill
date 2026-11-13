@@ -2,14 +2,14 @@
 name: validai
 description: Prepare a prototype for user validation in ValidAI — read the prototype, recommend Task Flows from the PM's goals and validation evidence (in-person notes, transcripts, PRD), tag click targets with data-validai-target, then push to ValidAI or package a .validai file; also analyze ValidAI test results with your own AI (export the request, answer it, import the result). Use when the user mentions ValidAI, wants to test or validate a prototype with users, wants task flows created, or wants usability test results analyzed.
 metadata:
-  version: "2026.11.13"
+  version: "2026.11.13-2"
 ---
 
 # ValidAI: prepare a prototype for validation
 
 Use this when a PM wants to test a prototype in ValidAI: upload it, turn their goals and validation evidence into recommended **Task Flows**, and make testers' clicks register reliably.
 
-ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.13
+ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.13-2
 
 ## Ground rules
 
@@ -61,7 +61,7 @@ Keep flows to 3–7 steps, and ask sparingly. Wait for the PM's "yes" (or edits)
 
 ## 5. Verify and hand off
 
-Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.13" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
+Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.13-2" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
 
 Then choose the hand-off:
 
@@ -85,7 +85,7 @@ Give the PM the `.validai` file. They upload it in ValidAI → New Prototype →
 
 **C. No shell** (e.g. Claude.ai): assemble the package as described in `reference/package.md` and give it to the PM to upload. ValidAI validates it again on upload.
 
-When re-importing: a flow whose `key` already exists is replaced in place if nobody has tested it; otherwise ValidAI keeps it and adds "<name> (v2)".
+When re-importing: a flow whose `key` already exists on the prototype's current iteration is replaced in place if nobody has tested it; otherwise ValidAI keeps it and adds "<name> (v2)". Flows on earlier iterations are never changed.
 
 Finish by telling the PM what was created, with the link https://validai.lukantan.com/prototypes.
 
@@ -106,11 +106,11 @@ Use this when the PM wants the prototype changed to fix what testing found. They
 
    - `changes`: what a tester will notice, in plain words, one sentence per change (≤ 2000 characters). The PM reads it on Iteration comparison next to the before-and-after numbers.
    - `addressedFindings`: the `Finding id` of each finding your changes address, copied exactly from the brief. Leave out findings you didn't address. Without a brief, leave the list out; the PM can tick findings in ValidAI.
-   - Leave `taskFlows` as they are unless the PM asked you to change a flow.
+   - Keep `taskFlows` up to date for the new build: in ValidAI, task flows and invites are locked to the iteration they were made for, so the flows in this file are set up fresh on the new iteration. Keep each flow's `key` and step `key`s the same, so results still line up with the earlier iteration. Update a flow only where your changes affect its steps, and show the PM those step changes before handing off.
 4. Hand off the same way as step 5 (A, B or C). With an `iteration` block:
-   - **Push** starts the next iteration with the new build and keeps the task flows as they are. It prints the new iteration number.
-   - **Package**: the PM opens the prototype in ValidAI → **New Iteration** and drops the `.validai` file. It fills in what changed and ticks the findings.
-   - If you also changed a flow's steps, run `node ${CLAUDE_SKILL_DIR}/scripts/validai-share.mjs --flows-only` afterwards. A tested flow is kept and the new steps arrive as "<name> (v2)".
+   - **Push** starts the next iteration with the new build, then sets up the flows on it. It prints the new iteration number. Earlier iterations keep their flows, sessions and invites.
+   - **Package**: the PM opens the prototype in ValidAI → **New Iteration** and drops the `.validai` file. It fills in what changed, ticks the findings, and sets up the flows.
+   - Remind the PM that invites stay on their iteration: to test the new version remotely, they create new invites with the new flows.
 5. After a successful hand-off, **delete the `iteration` block** from `validai-flows.json`. It describes one iteration only, and a later push with it still in place would start another iteration with the same text.
 
 Finish by telling the PM the iteration number and what it addresses, with the link https://validai.lukantan.com/prototypes.

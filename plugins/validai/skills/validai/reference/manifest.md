@@ -33,7 +33,7 @@
 - `prototype.name` is informational: it names the `.validai` file and prefills the prototype name on upload.
 - `prototype.builtWith` is the AI assistant you're running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex"), ≤ 60 characters. ValidAI shows it as the prototype's "Built with" label.
 - `generator` says what wrote the file: `{ "name": "validai-skill", "version": "<this skill's version>" }` (the version is printed in the skill's instructions). The helper's `pack` adds `{ "name": "validai-share", … }` when it's missing. ValidAI uses it to tell the PM when the skill is out of date. Both fields are optional strings ≤ 40 characters; other names are allowed.
-- `iteration` (optional) makes the push or package a **new iteration** of an already-tested prototype: the build becomes the next version, the task flows stay as they are, and ValidAI records what changed. `changes` is required (≤ 2000 characters): what a tester will notice, in plain words. `addressedFindings` (optional, ≤ 100) lists the `Finding id`s from the findings brief that the changes address. Ids that aren't tracked findings on the prototype are left out with a warning. Delete the block after the hand-off.
+- `iteration` (optional) makes the push or package a **new iteration** of an already-tested prototype: the build becomes the next version, the file's task flows are set up on it (earlier iterations keep their flows, sessions and invites), and ValidAI records what changed. `changes` is required (≤ 2000 characters): what a tester will notice, in plain words. `addressedFindings` (optional, ≤ 100) lists the `Finding id`s from the findings brief that the changes address. Ids that aren't tracked findings on the prototype are left out with a warning. Delete the block after the hand-off.
 - `source.kind`: `in-person-validation`, `transcript`, `prd`, `prototype-analysis`, or `other`. `source.notes` ≤ 500 characters.
 - `testTitle` and `testIntro` (both optional) are what testers see on the invite link before they start: a friendly test name and a short intro (what the app is for and the task, with no hints). When the PM creates an invite with this flow, ValidAI fills the invite's title and intro from them. Without a `testTitle`, testers see a readable form of the prototype name.
 - `completionType` defaults to `interaction` when omitted.
@@ -73,4 +73,6 @@ Every error names a JSON path, e.g. `taskFlows[1].steps[3].target.tag "Pay-Now":
 
 ## Re-importing
 
-The flow `key` is the identity. A flow with the same key is **replaced in place** if nobody has tested it yet. If it already has sessions, ValidAI keeps it and creates `<name> (v2)` (then v3, …). Step ids are kept for steps whose `key` didn't change.
+The flow `key` is the identity, within the prototype's current iteration. A flow with the same key is **replaced in place** if nobody has tested it yet. If it already has sessions, ValidAI keeps it and creates `<name> (v2)` (then v3, …). Step ids are kept for steps whose `key` didn't change.
+
+Task flows are locked to the iteration they were imported on. After a new iteration, a key that exists only on earlier iterations becomes a new flow on the current one, linked to the earlier flow so results compare across iterations.
