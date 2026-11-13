@@ -5,6 +5,10 @@
   "schemaVersion": 1,
   "prototype": { "name": "Checkout v3", "builtWith": "Claude Code" }, // optional; see below
   "source": { "kind": "in-person-validation", "notes": "Round 2, 2026-09-28" },
+  "iteration": {                                    // only when shipping a new iteration; see below
+    "changes": "Moved fee cover above the Pay button",
+    "addressedFindings": ["ai_HpKXkF07TbffwVMyP3LG_f1a2b3c4"]
+  },
   "taskFlows": [{
     "key": "checkout-happy-path",                   // stable id — keep it the same across re-runs
     "name": "Checkout happy path",
@@ -29,6 +33,7 @@
 - `prototype.name` is informational: it names the `.validai` file and prefills the prototype name on upload.
 - `prototype.builtWith` is the AI assistant you're running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex"), ≤ 60 characters. ValidAI shows it as the prototype's "Built with" label.
 - `generator` says what wrote the file: `{ "name": "validai-skill", "version": "<this skill's version>" }` (the version is printed in the skill's instructions). The helper's `pack` adds `{ "name": "validai-share", … }` when it's missing. ValidAI uses it to tell the PM when the skill is out of date. Both fields are optional strings ≤ 40 characters; other names are allowed.
+- `iteration` (optional) makes the push or package a **new iteration** of an already-tested prototype: the build becomes the next version, the task flows stay as they are, and ValidAI records what changed. `changes` is required (≤ 2000 characters): what a tester will notice, in plain words. `addressedFindings` (optional, ≤ 100) lists the `Finding id`s from the findings brief that the changes address. Ids that aren't tracked findings on the prototype are left out with a warning. Delete the block after the hand-off.
 - `source.kind`: `in-person-validation`, `transcript`, `prd`, `prototype-analysis`, or `other`. `source.notes` ≤ 500 characters.
 - `testTitle` and `testIntro` (both optional) are what testers see on the invite link before they start: a friendly test name and a short intro (what the app is for and the task, with no hints). When the PM creates an invite with this flow, ValidAI fills the invite's title and intro from them. Without a `testTitle`, testers see a readable form of the prototype name.
 - `completionType` defaults to `interaction` when omitted.
@@ -47,14 +52,14 @@ Every error names a JSON path, e.g. `taskFlows[1].steps[3].target.tag "Pay-Now":
 | `not-object` | The file must be a JSON object. |
 | `schema-version` | `schemaVersion` must be `1`. |
 | `unknown-key` | *Warning only.* An unrecognized field is ignored. |
-| `required` | Required fields are missing or blank: `taskFlows[].key`, `name`, `steps[].key`, `instruction`, intercept `question`. |
+| `required` | Required fields are missing or blank: `taskFlows[].key`, `name`, `steps[].key`, `instruction`, intercept `question`, `iteration.changes`. |
 | `type` | A field has the wrong JSON type. |
 | `key-format` | Flow keys, step keys and tags must match `^[a-z0-9][a-z0-9-]{0,63}$` (lowercase kebab-case, ≤ 64). |
 | `reserved-suffix` | Flow keys must not end in `--v<number>` (ValidAI uses it for versions). |
 | `duplicate-key` | Flow keys are unique in the file; step keys are unique within their flow. |
 | `empty-list` | At least 1 task flow, and at least 1 step per flow. |
-| `too-many` | At most 50 task flows, and at most 100 steps per flow. |
-| `too-long` | `name` ≤ 120, `instruction` ≤ 500, `completionMessage` ≤ 200, `hint` ≤ 300, intercept `question`/`followUpQuestion` ≤ 500, `rationale` ≤ 1000, `testTitle` ≤ 120, `testIntro` ≤ 2000, `source.notes` ≤ 500, `prototype.builtWith` ≤ 60, `generator.name`/`generator.version` ≤ 40 characters. |
+| `too-many` | At most 50 task flows, at most 100 steps per flow, and at most 100 `iteration.addressedFindings`. |
+| `too-long` | `name` ≤ 120, `instruction` ≤ 500, `completionMessage` ≤ 200, `hint` ≤ 300, intercept `question`/`followUpQuestion` ≤ 500, `rationale` ≤ 1000, `testTitle` ≤ 120, `testIntro` ≤ 2000, `source.notes` ≤ 500, `prototype.builtWith` ≤ 60, `generator.name`/`generator.version` ≤ 40, `iteration.changes` ≤ 2000 characters. |
 | `completion-type` | `completionType` must be `interaction`, `appearance`, `checklist` or `self-report`. |
 | `target-required` | `interaction`/`appearance` need `target`; `checklist` needs ≥ 1 `targets`; every target needs a `tag` or a `label`. |
 | `target-forbidden` | `interaction`/`appearance` can't have `targets`/`threshold`; `checklist` can't have `target`; `self-report` can't have any of them. |
@@ -63,6 +68,7 @@ Every error names a JSON path, e.g. `taskFlows[1].steps[3].target.tag "Pay-Now":
 | `response-type` | `responseType` must be `scale`, `choice`, `reaction` or `text`. |
 | `choices-required` | A `choice` question needs at least 2 non-blank `choices`. |
 | `source-kind` | `source.kind` must be one of the kinds listed above. |
+| `finding-id` | Each `iteration.addressedFindings` entry must be a finding id as the findings brief prints it: letters, digits, `_` and `-`, ≤ 200 characters. |
 | `missing-tag` | Every `tag` must appear as `data-validai-target="…"` in the build. It's an error for uploaded builds, and a warning for URL prototypes. |
 
 ## Re-importing

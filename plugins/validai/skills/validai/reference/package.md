@@ -33,4 +33,4 @@ with zipfile.ZipFile("prototype.validai", "w", zipfile.ZIP_DEFLATED) as z:
 Testers can download everything in `bundle/`, so put only what the page loads there: no `.env`, `.git/`, evidence notes or other project files.
 
 For a single self-contained HTML prototype, `bundle/index.html` can be that file.
-The PM uploads it in ValidAI → New Prototype → **drop the .validai file**. ValidAI validates everything again on upload and shows any problems before anything is created.
+The PM uploads it in ValidAI → New Prototype → **drop the .validai file**. A package with an `iteration` block is a new version of an existing prototype instead: the PM drops it on that prototype's **New Iteration**. ValidAI validates everything again on upload and shows any problems before anything is created.

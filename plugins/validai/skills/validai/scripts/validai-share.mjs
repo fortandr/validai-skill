@@ -219,7 +219,7 @@ function describeRootAbsolute(files) {
 }
 
 // cli/src/version.ts
-var HELPER_VERSION = true ? "2026.11.10" : "dev";
+var HELPER_VERSION = true ? "2026.11.13" : "dev";
 var CLIENT_HEADER = { "X-ValidAI-Client": `validai-share/${HELPER_VERSION}` };
 
 // cli/src/api.ts
@@ -257,11 +257,11 @@ async function createPrototype(baseUrl, token, name) {
   if (!res.ok) throw new Error(await errorDetail(res));
   return (await res.json()).prototypeId;
 }
-async function ingest(baseUrl, token, prototypeId, files) {
+async function ingest(baseUrl, token, prototypeId, files, iteration) {
   const res = await fetch(`${baseUrl}/__api/prototypes/ingest`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...CLIENT_HEADER },
-    body: JSON.stringify({ prototypeId, files })
+    body: JSON.stringify({ prototypeId, files, ...iteration ? { iteration } : {} })
   });
   if (!res.ok) throw new Error(await errorDetail(res));
   return await res.json();
@@ -307,6 +307,10 @@ import { resolve } from "node:path";
 // src/shared/flowManifest/types.ts
 var SCHEMA_VERSION = 1;
 
+// src/shared/iteration.ts
+var ITERATION_LIMITS = { changes: 2e3, findings: 100 };
+var FINDING_ID_RE = /^[A-Za-z0-9_-]{1,200}$/;
+
 // src/shared/flowManifest/validate.ts
 var KEY_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 var RESERVED_SUFFIX_RE = /--v\d+$/;
@@ -329,7 +333,8 @@ var LIMITS = {
 var COMPLETION_TYPES = ["interaction", "appearance", "checklist", "self-report"];
 var RESPONSE_TYPES = ["scale", "choice", "reaction", "text"];
 var SOURCE_KINDS = ["in-person-validation", "transcript", "prd", "prototype-analysis", "other"];
-var TOP_KEYS = ["schemaVersion", "prototype", "generator", "source", "taskFlows"];
+var TOP_KEYS = ["schemaVersion", "prototype", "generator", "source", "iteration", "taskFlows"];
+var ITERATION_KEYS = ["changes", "addressedFindings"];
 var FLOW_KEYS = ["key", "name", "description", "rationale", "testTitle", "testIntro", "steps", "endIntercepts"];
 var STEP_KEYS = ["key", "instruction", "completionMessage", "hint", "completionType", "target", "targets", "threshold", "intercept"];
 var TARGET_KEYS = ["tag", "label", "context"];
@@ -546,6 +551,27 @@ function validateManifest(raw) {
       text(raw.source, "notes", "source", LIMITS.notes, false);
     }
   }
+  if (raw.iteration !== void 0) {
+    if (!isObj(raw.iteration)) err2("type", "iteration", "must be an object");
+    else {
+      unknownKeys(raw.iteration, ITERATION_KEYS, "iteration");
+      text(raw.iteration, "changes", "iteration", ITERATION_LIMITS.changes, true);
+      const ids = raw.iteration.addressedFindings;
+      if (ids !== void 0) {
+        if (!Array.isArray(ids)) err2("type", "iteration.addressedFindings", "must be an array of finding ids");
+        else {
+          if (ids.length > ITERATION_LIMITS.findings) {
+            err2("too-many", "iteration.addressedFindings", `allows at most ${ITERATION_LIMITS.findings} findings (got ${ids.length})`);
+          }
+          ids.forEach((id, i2) => {
+            if (typeof id !== "string" || !FINDING_ID_RE.test(id)) {
+              err2("finding-id", `iteration.addressedFindings[${i2}]`, `${JSON.stringify(id)}: must be a finding id from the findings brief (e.g. "ai_x3Lk9_f1a2b3c4")`);
+            }
+          });
+        }
+      }
+    }
+  }
   if (!Array.isArray(raw.taskFlows) || raw.taskFlows.length === 0) {
     err2("empty-list", "taskFlows", "must list at least 1 task flow");
   } else {
@@ -701,6 +727,15 @@ async function runShare(files, flows, api, out, localUpdate) {
     }
   }
   for (const w of flows?.warnings ?? []) out.log(`  \u26A0 ${w}`);
+  const it = flows?.manifest.iteration;
+  if (files && it) {
+    const result = await api.ingest(files, { changes: it.changes, findingIds: it.addressedFindings ?? [] });
+    const n = it.addressedFindings?.length ?? 0;
+    out.log(`\u2713 Started iteration v${result.iteration ?? "?"}${n ? `, addressing ${n} finding${n === 1 ? "" : "s"}` : ""}`);
+    for (const w of result.warnings) out.log(`  \u26A0 ${w}`);
+    out.log("  Task flows were kept as they are. If you changed their steps, run: validai-share --flows-only");
+    return 0;
+  }
   let version = null;
   if (files) {
     const result = await api.ingest(files);
@@ -1690,7 +1725,9 @@ async function run(argv, localUpdate) {
     }
     const outFile = args.out ?? packageFileName(manifest.manifest, defaultName(cwd));
     writeFileSync3(resolve2(cwd, outFile), buildPackage(manifest.text, files2, HELPER_VERSION));
-    console.log(`\u2713 Wrote ${outFile} \u2014 upload it in ValidAI \u2192 New Prototype \u2192 drop the .validai file`);
+    console.log(
+      manifest.manifest.iteration ? `\u2713 Wrote ${outFile} \u2014 upload it in ValidAI \u2192 your prototype \u2192 New Iteration \u2192 drop the .validai file` : `\u2713 Wrote ${outFile} \u2014 upload it in ValidAI \u2192 New Prototype \u2192 drop the .validai file`
+    );
     return 0;
   }
   const { token, appUrl } = loadConfig(args, process.env, home);
@@ -1732,13 +1769,14 @@ async function run(argv, localUpdate) {
       files,
       flows,
       {
-        ingest: (f) => ingest(appUrl, token, prototypeId, f),
+        ingest: (f, iteration) => ingest(appUrl, token, prototypeId, f, iteration),
         importFlows: (text) => importFlows(appUrl, token, prototypeId, text)
       },
       console,
       localUpdate
     );
-    if (code === 0) console.log(`\u2192 ${appUrl}/prototypes/${prototypeId}${flows ? "/task-flows" : ""}`);
+    const toFlows = flows && !(files && flows.manifest.iteration);
+    if (code === 0) console.log(`\u2192 ${appUrl}/prototypes/${prototypeId}${toFlows ? "/task-flows" : ""}`);
     return code;
   } catch (err2) {
     console.error(`\u2717 ${err2.message}`);
