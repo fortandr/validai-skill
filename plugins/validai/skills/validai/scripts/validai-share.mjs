@@ -219,7 +219,7 @@ function describeRootAbsolute(files) {
 }
 
 // cli/src/version.ts
-var HELPER_VERSION = true ? "2026.11.13-3" : "dev";
+var HELPER_VERSION = true ? "2026.11.13-4" : "dev";
 var CLIENT_HEADER = { "X-ValidAI-Client": `validai-share/${HELPER_VERSION}` };
 
 // cli/src/api.ts
@@ -295,6 +295,15 @@ async function importAnalysis(baseUrl, token, answer) {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...CLIENT_HEADER },
     body: answer
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return await res.json();
+}
+async function createInvite(baseUrl, token, prototypeId, body) {
+  const res = await fetch(`${baseUrl}/__api/prototypes/${encodeURIComponent(prototypeId)}/invites`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...CLIENT_HEADER },
+    body: JSON.stringify(body)
   });
   if (!res.ok) throw new Error(await errorDetail(res));
   return await res.json();
@@ -1549,6 +1558,7 @@ async function checkForUpdateInfo(appUrl, current, scriptPath, fetchImpl = fetch
 // cli/src/index.ts
 function parseArgs(argv) {
   if (argv[0] === "analysis") return parseAnalysisArgs(argv.slice(1));
+  if (argv[0] === "invite") return parseInviteArgs(argv.slice(1));
   const command = argv[0] === "login" ? "login" : argv[0] === "pack" ? "pack" : "share";
   const out = { command };
   const rest = command === "share" ? argv : argv.slice(1);
@@ -1610,6 +1620,72 @@ ${ANALYSIS_USAGE}`;
   if (action === "import" && !out.dir && !out.error) out.error = `analysis import needs the answer file
 ${ANALYSIS_USAGE}`;
   return out;
+}
+var INVITE_USAGE = "Usage: validai-share invite --flow <key> [--name <label>] [--title <tester title>] [--intro <text>]\n         [--opens <date-time>] [--closes <date-time>] [--allow <emails/@domains, comma-separated>] [--minutes <N>]\n  Dates are your local time, e.g. 2026-11-22T23:59.";
+function localTime(v) {
+  if (!v) return NaN;
+  const ms = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T23:59` : v).getTime();
+  return Number.isFinite(ms) ? ms : NaN;
+}
+function parseInviteArgs(rest) {
+  const out = { command: "invite" };
+  const req = {};
+  for (let i2 = 0; i2 < rest.length; i2 += 1) {
+    const a = rest[i2];
+    const val = () => rest[++i2];
+    if (a === "--url") out.url = val();
+    else if (a === "--flow") req.flow = val();
+    else if (a === "--name") req.name = val();
+    else if (a === "--title") req.testTitle = val();
+    else if (a === "--intro") req.intro = val();
+    else if (a === "--opens" || a === "--closes") {
+      const raw = val();
+      const ms = localTime(raw);
+      if (Number.isNaN(ms)) {
+        out.error = `${a} "${raw ?? ""}" isn't a date-time like 2026-11-22T23:59
+${INVITE_USAGE}`;
+        break;
+      }
+      if (a === "--opens") req.opensAt = ms;
+      else req.closesAt = ms;
+    } else if (a === "--allow") req.allowedEmails = (val() ?? "").split(",").map((e) => e.trim()).filter(Boolean);
+    else if (a === "--minutes") {
+      const m = Number(val());
+      if (!Number.isFinite(m) || m < 1) {
+        out.error = `--minutes must be a number of minutes
+${INVITE_USAGE}`;
+        break;
+      }
+      req.maxDurationMinutes = m;
+    } else {
+      out.error = `Unknown option ${a}
+${INVITE_USAGE}`;
+      break;
+    }
+  }
+  if (!out.error && !req.flow) out.error = `invite needs --flow <key>
+${INVITE_USAGE}`;
+  if (!out.error) out.invite = req;
+  return out;
+}
+async function runInvite(args, cwd, appUrl, token) {
+  const ref = readProjectRef(cwd);
+  if (!ref) {
+    console.error("\u2717 No prototype in this folder (.validai.json). Run this where you ran validai-share.");
+    return 1;
+  }
+  try {
+    const r = await createInvite(appUrl, token, ref.prototypeId, args.invite);
+    const when = (ms) => ms ? new Date(ms).toLocaleString(void 0, { dateStyle: "medium", timeStyle: "short" }) : "";
+    console.log(`\u2713 Created invite "${r.name}" (iteration ${r.iteration})`);
+    if (r.opensAt) console.log(`  Opens ${when(r.opensAt)}`);
+    if (r.closesAt) console.log(`  Closes ${when(r.closesAt)}`);
+    console.log(`\u2192 ${appUrl}${r.joinPath}`);
+    return 0;
+  } catch (err2) {
+    console.error(`\u2717 ${err2.message}`);
+    return 1;
+  }
 }
 async function runAnalysis(args, cwd, appUrl, token) {
   try {
@@ -1690,6 +1766,14 @@ async function run(argv, localUpdate) {
     saveConfig(token2, url, home);
     console.log("Saved to ~/.validai/config.json");
     return 0;
+  }
+  if (args.command === "invite") {
+    const { token: token2, appUrl: appUrl2 } = loadConfig(args, process.env, home);
+    if (!token2) {
+      console.error("No CLI token. Generate one in ValidAI \u2192 Settings \u2192 CLI token, then run `validai-share login` (or set VALIDAI_TOKEN).");
+      return 1;
+    }
+    return runInvite(args, cwd, appUrl2, token2);
   }
   if (args.command === "analysis") {
     const { token: token2, appUrl: appUrl2 } = loadConfig(args, process.env, home);

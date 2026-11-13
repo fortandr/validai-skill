@@ -7,7 +7,7 @@
     {
       "name": "validai",
       "source": "./plugins/validai",
-      "description": "Prepare a prototype for user validation in ValidAI: recommend Task Flows from your goals and evidence, tag click targets, then push or package a .validai file. Analyze the test results with your own AI."
+      "description": "Prepare a prototype for user validation in ValidAI: recommend Task Flows from your goals and evidence, tag click targets, push or package a .validai file, and create invite links. Analyze the test results with your own AI."
     }
   ]
 }
