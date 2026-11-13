@@ -2,14 +2,14 @@
 name: validai
 description: Prepare a prototype for user validation in ValidAI — read the prototype, recommend Task Flows from the PM's goals and validation evidence (in-person notes, transcripts, PRD), tag click targets with data-validai-target, then push to ValidAI or package a .validai file; also analyze ValidAI test results with your own AI (export the request, answer it, import the result). Use when the user mentions ValidAI, wants to test or validate a prototype with users, wants task flows created, or wants usability test results analyzed.
 metadata:
-  version: "2026.11.13-2"
+  version: "2026.11.13-3"
 ---
 
 # ValidAI: prepare a prototype for validation
 
 Use this when a PM wants to test a prototype in ValidAI: upload it, turn their goals and validation evidence into recommended **Task Flows**, and make testers' clicks register reliably.
 
-ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.13-2
+ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.13-3
 
 ## Ground rules
 
@@ -61,7 +61,7 @@ Keep flows to 3–7 steps, and ask sparingly. Wait for the PM's "yes" (or edits)
 
 ## 5. Verify and hand off
 
-Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.13-2" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
+Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.13-3" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
 
 Then choose the hand-off:
 
@@ -85,7 +85,7 @@ Give the PM the `.validai` file. They upload it in ValidAI → New Prototype →
 
 **C. No shell** (e.g. Claude.ai): assemble the package as described in `reference/package.md` and give it to the PM to upload. ValidAI validates it again on upload.
 
-When re-importing: a flow whose `key` already exists on the prototype's current iteration is replaced in place if nobody has tested it; otherwise ValidAI keeps it and adds "<name> (v2)". Flows on earlier iterations are never changed.
+When re-importing: a flow whose `key` already exists on the prototype's current iteration is replaced in place if nobody has tested it; otherwise ValidAI keeps it and adds a new version of it (same name, shown as "Version 2"). Flows on earlier iterations are never changed.
 
 Finish by telling the PM what was created, with the link https://validai.lukantan.com/prototypes.
 

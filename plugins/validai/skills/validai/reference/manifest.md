@@ -73,6 +73,6 @@ Every error names a JSON path, e.g. `taskFlows[1].steps[3].target.tag "Pay-Now":
 
 ## Re-importing
 
-The flow `key` is the identity, within the prototype's current iteration. A flow with the same key is **replaced in place** if nobody has tested it yet. If it already has sessions, ValidAI keeps it and creates `<name> (v2)` (then v3, …). Step ids are kept for steps whose `key` didn't change.
+The flow `key` is the identity, within the prototype's current iteration. A flow with the same key is **replaced in place** if nobody has tested it yet. If it already has sessions, ValidAI keeps it and creates the flow's next version (same name, shown as Version 2, then 3, …). Step ids are kept for steps whose `key` didn't change.
 
 Task flows are locked to the iteration they were imported on. After a new iteration, a key that exists only on earlier iterations becomes a new flow on the current one, linked to the earlier flow so results compare across iterations.
