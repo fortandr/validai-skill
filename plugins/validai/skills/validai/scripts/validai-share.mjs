@@ -219,7 +219,7 @@ function describeRootAbsolute(files) {
 }
 
 // cli/src/version.ts
-var HELPER_VERSION = true ? "2026.11.13-4" : "dev";
+var HELPER_VERSION = true ? "2026.11.23" : "dev";
 var CLIENT_HEADER = { "X-ValidAI-Client": `validai-share/${HELPER_VERSION}` };
 
 // cli/src/api.ts
@@ -304,6 +304,13 @@ async function createInvite(baseUrl, token, prototypeId, body) {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...CLIENT_HEADER },
     body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return await res.json();
+}
+async function listFindings(baseUrl, token, prototypeId) {
+  const res = await fetch(`${baseUrl}/__api/prototypes/${encodeURIComponent(prototypeId)}/findings`, {
+    headers: { Authorization: `Bearer ${token}`, ...CLIENT_HEADER }
   });
   if (!res.ok) throw new Error(await errorDetail(res));
   return await res.json();
@@ -740,10 +747,15 @@ async function runShare(files, flows, api, out, localUpdate) {
   let uploaded = null;
   if (files && it) {
     const result = await api.ingest(files, { changes: it.changes, findingIds: it.addressedFindings ?? [] });
-    uploaded = `iteration v${result.iteration ?? "?"}`;
-    const n = it.addressedFindings?.length ?? 0;
-    out.log(`\u2713 Started iteration v${result.iteration ?? "?"}${n ? `, addressing ${n} finding${n === 1 ? "" : "s"}` : ""}`);
+    const v = result.iteration ?? "?";
+    uploaded = `iteration v${v}`;
+    const n = (result.findingIds ?? it.addressedFindings ?? []).length;
+    out.log(`\u2713 Started iteration v${v}${n ? `, addressing ${n} finding${n === 1 ? "" : "s"}` : ""}`);
     for (const w of result.warnings) out.log(`  \u26A0 ${w}`);
+    if (n === 0) {
+      out.log(`  \u26A0 Iteration v${v} isn't linked to any findings, so ValidAI can't check whether the fixes worked.`);
+      out.log("    See the open findings with `validai-share findings`, then link them in ValidAI \u2192 Insights \u2192 Link findings.");
+    }
   }
   if (files && !it) {
     const result = await api.ingest(files);
@@ -1559,6 +1571,7 @@ async function checkForUpdateInfo(appUrl, current, scriptPath, fetchImpl = fetch
 function parseArgs(argv) {
   if (argv[0] === "analysis") return parseAnalysisArgs(argv.slice(1));
   if (argv[0] === "invite") return parseInviteArgs(argv.slice(1));
+  if (argv[0] === "findings") return parseFindingsArgs(argv.slice(1));
   const command = argv[0] === "login" ? "login" : argv[0] === "pack" ? "pack" : "share";
   const out = { command };
   const rest = command === "share" ? argv : argv.slice(1);
@@ -1668,6 +1681,49 @@ ${INVITE_USAGE}`;
   if (!out.error) out.invite = req;
   return out;
 }
+var FINDINGS_USAGE = "Usage: validai-share findings [--json]";
+function parseFindingsArgs(rest) {
+  const out = { command: "findings" };
+  for (let i2 = 0; i2 < rest.length; i2 += 1) {
+    const a = rest[i2];
+    if (a === "--url") out.url = rest[++i2];
+    else if (a === "--json") out.json = true;
+    else {
+      out.error = `Unknown option ${a}
+${FINDINGS_USAGE}`;
+      break;
+    }
+  }
+  return out;
+}
+function formatFindings(r) {
+  if (r.findings.length === 0) return [`No open findings on "${r.prototype}" (iteration ${r.iteration}).`];
+  const lines = [`Open findings on "${r.prototype}" (iteration ${r.iteration}): ${r.findings.length}`];
+  for (const f of r.findings) {
+    lines.push("", `[${f.severity}${f.status === "validated" ? "" : `, ${f.status}`}] ${f.title}${f.taskFlow ? ` (${f.taskFlow})` : ""}`);
+    lines.push(`  Finding id: ${f.id}`);
+    const d = f.description.replace(/\s+/g, " ").trim();
+    if (d) lines.push(`  ${d.length > 240 ? `${d.slice(0, 239)}\u2026` : d}`);
+  }
+  lines.push("", "List the ids of the findings your changes address in the flows file's iteration.addressedFindings.");
+  return lines;
+}
+async function runFindings(args, cwd, appUrl, token) {
+  const ref = readProjectRef(cwd);
+  if (!ref) {
+    console.error("\u2717 No prototype in this folder (.validai.json). Run this where you ran validai-share.");
+    return 1;
+  }
+  try {
+    const r = await listFindings(appUrl, token, ref.prototypeId);
+    if (args.json) console.log(JSON.stringify(r, null, 2));
+    else for (const line of formatFindings(r)) console.log(line);
+    return 0;
+  } catch (err2) {
+    console.error(`\u2717 ${err2.message}`);
+    return 1;
+  }
+}
 async function runInvite(args, cwd, appUrl, token) {
   const ref = readProjectRef(cwd);
   if (!ref) {
@@ -1766,6 +1822,14 @@ async function run(argv, localUpdate) {
     saveConfig(token2, url, home);
     console.log("Saved to ~/.validai/config.json");
     return 0;
+  }
+  if (args.command === "findings") {
+    const { token: token2, appUrl: appUrl2 } = loadConfig(args, process.env, home);
+    if (!token2) {
+      console.error("No CLI token. Generate one in ValidAI \u2192 Settings \u2192 CLI token, then run `validai-share login` (or set VALIDAI_TOKEN).");
+      return 1;
+    }
+    return runFindings(args, cwd, appUrl2, token2);
   }
   if (args.command === "invite") {
     const { token: token2, appUrl: appUrl2 } = loadConfig(args, process.env, home);
@@ -1884,6 +1948,7 @@ if (invokedAsScript) {
   main(process.argv.slice(2)).then((code) => process.exit(code));
 }
 export {
+  formatFindings,
   main,
   parseArgs
 };

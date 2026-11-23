@@ -2,14 +2,14 @@
 name: validai
 description: Prepare a prototype for user validation in ValidAI — read the prototype, recommend Task Flows from the PM's goals and validation evidence (in-person notes, transcripts, PRD), tag click targets with data-validai-target, then push to ValidAI or package a .validai file; also analyze ValidAI test results with your own AI (export the request, answer it, import the result). Use when the user mentions ValidAI, wants to test or validate a prototype with users, wants task flows created, or wants usability test results analyzed.
 metadata:
-  version: "2026.11.13-4"
+  version: "2026.11.23"
 ---
 
 # ValidAI: prepare a prototype for validation
 
 Use this when a PM wants to test a prototype in ValidAI: upload it, turn their goals and validation evidence into recommended **Task Flows**, and make testers' clicks register reliably.
 
-ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.13-4
+ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.23
 
 ## Ground rules
 
@@ -61,7 +61,7 @@ Keep flows to 3–7 steps, and ask sparingly. Wait for the PM's "yes" (or edits)
 
 ## 5. Verify and hand off
 
-Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.13-4" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
+Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.23" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
 
 Then choose the hand-off:
 
@@ -113,7 +113,15 @@ An invite stays on the iteration it was created for. After a new iteration, crea
 
 Use this when the PM wants the prototype changed to fix what testing found. They usually give you a findings brief from ValidAI (Insights → **Export validated for AI**, or **Iterate** on one finding). Each finding in it has a `Finding id`.
 
-1. Read the brief and the prototype. For each finding, restate the problem in a sentence and propose the smallest change that fixes it. Wait for the PM's "yes" (or edits) before changing anything. If the evidence is too thin, or a fix needs a redesign, say so.
+Every iteration should name the findings it addresses: that is how ValidAI checks whether the fixes worked. If the PM describes the problems in their own words, pastes titles, or gives no brief, get the ids yourself. With a CLI token, in the folder holding `.validai.json`:
+
+```
+node ${CLAUDE_SKILL_DIR}/scripts/validai-share.mjs findings
+```
+
+It lists the prototype's open findings (tracked, not yet addressed by an iteration), most important first, each with its `Finding id`. Match what the PM asked for to these findings. Without a CLI token, ask the PM for the findings brief.
+
+1. Read the brief (or the findings list) and the prototype. For each finding, restate the problem in a sentence and propose the smallest change that fixes it. Wait for the PM's "yes" (or edits) before changing anything. If the evidence is too thin, or a fix needs a redesign, say so.
 2. Make the changes. **Keep every existing `data-validai-target` on the same control**, because the tested task flows depend on it: if a control moves or is replaced, move its tag with it. Then run the build.
 3. Add an `iteration` block to `validai-flows.json`:
 
@@ -125,7 +133,7 @@ Use this when the PM wants the prototype changed to fix what testing found. They
    ```
 
    - `changes`: what a tester will notice, in plain words, one sentence per change (≤ 2000 characters). The PM reads it on Iteration comparison next to the before-and-after numbers.
-   - `addressedFindings`: the `Finding id` of each finding your changes address, copied exactly from the brief. Leave out findings you didn't address. Without a brief, leave the list out; the PM can tick findings in ValidAI.
+   - `addressedFindings`: the `Finding id` of each finding your changes address, copied exactly from the brief or from `findings`. Leave out findings you didn't address. Before handing off, show the PM the list as titles ("These changes address: …") and let them add or remove any. Leave it empty only when the changes address no tracked finding (say so to the PM); the push then warns that the iteration isn't linked.
    - Keep `taskFlows` up to date for the new build: in ValidAI, task flows and invites are locked to the iteration they were made for, so the flows in this file are set up fresh on the new iteration. Keep each flow's `key` and step `key`s the same, so results still line up with the earlier iteration. Update a flow only where your changes affect its steps, and show the PM those step changes before handing off.
 4. Hand off the same way as step 5 (A, B or C). With an `iteration` block:
    - **Push** starts the next iteration with the new build, then sets up the flows on it. It prints the new iteration number. Earlier iterations keep their flows, sessions and invites.
@@ -133,7 +141,7 @@ Use this when the PM wants the prototype changed to fix what testing found. They
    - Invites stay on their iteration: offer to create new invite links for the new flows (see **Create invite links**), and remind the PM to close the old ones in ValidAI → Invites when they stop testing the old version.
 5. After a successful hand-off, **delete the `iteration` block** from `validai-flows.json`. It describes one iteration only, and a later push with it still in place would start another iteration with the same text.
 
-Finish by telling the PM the iteration number and what it addresses, with the link https://validai.lukantan.com/prototypes.
+Finish by telling the PM the iteration number and what it addresses, with the link https://validai.lukantan.com/prototypes. If the push printed that the iteration isn't linked to any findings, or left out finding ids, tell the PM and point them to ValidAI → Insights → **Link findings** for that iteration.
 
 ## Analyze test results with your own AI
 
