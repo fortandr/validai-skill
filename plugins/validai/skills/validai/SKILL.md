@@ -2,14 +2,14 @@
 name: validai
 description: Prepare a prototype for user validation in ValidAI — read the prototype, recommend Task Flows from the PM's goals and validation evidence (in-person notes, transcripts, PRD), tag click targets with data-validai-target, then push to ValidAI or package a .validai file; also analyze ValidAI test results with your own AI (export the request, answer it, import the result). Use when the user mentions ValidAI, wants to test or validate a prototype with users, wants task flows created, or wants usability test results analyzed.
 metadata:
-  version: "2026.11.23"
+  version: "2026.11.24"
 ---
 
 # ValidAI: prepare a prototype for validation
 
 Use this when a PM wants to test a prototype in ValidAI: upload it, turn their goals and validation evidence into recommended **Task Flows**, and make testers' clicks register reliably.
 
-ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.23
+ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.24
 
 ## Ground rules
 
@@ -40,6 +40,7 @@ For each recommended flow, show the PM:
 - the steps. For each: the instruction (what the tester is asked to do, in the tester's words, with no UI hints that give the answer away), a completion type, a target, and a `completionMessage`: one neutral sentence, in the tester's terms, saying what they just found or did (e.g. "You found the inventory summary showing the auction is light."). It's shown right before the ease rating, so no praise ("Great job!") and no hints about later steps; ≤ 200 characters
 - a `hint` for any step whose target isn't on the screen the tester is on when the step begins (they have to navigate to find it): one sentence pointing to the area, not the exact control (e.g. "Organization-wide options live under Settings in the left menu."); ≤ 300 characters. Testers see it only if they ask, and ValidAI records who did
 - an optional question after one step (`intercept`) and 1–2 session-end questions (`endIntercepts`)
+- 1–2 **context questions** about the tester, as extra `endIntercepts` with `"purpose": "context"`. Ask about their situation, not about the prototype: their role, team size, how often they do this task, or the tools they use for it (e.g. "Who on your team closes out an event?", "What do you reconcile deposits against?"). Choose questions whose answers would tell apart the different kinds of people this prototype is for. Prefer `choice` with 3–5 options plus a `text` follow-up only when the options can't cover it. Never ask for anything identifying (name, employer, email). ValidAI labels these answers "About the tester" in the session's notes and in the findings export
 
 | Completion type | Use when | Needs |
 |---|---|---|
@@ -59,9 +60,31 @@ Keep flows to 3–7 steps, and ask sparingly. Wait for the PM's "yes" (or edits)
 - JSX: `<button data-validai-target="pay-now">`. If a custom component doesn't pass unknown props through to the DOM, put the attribute on the DOM element inside it.
 - Show the PM the diff before applying it. Then run the build.
 
-## 5. Verify and hand off
+## 5. Dry run
 
-Write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.23" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
+First, write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.24" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
+
+Before anything is uploaded, walk every flow the way a tester would, against the local build. This catches steps that can't be done, controls that don't count when clicked, and instructions that give the answer away, so they're fixed before real testers spend time on them.
+
+1. **Check for a browser tool** you can drive: Claude in Chrome, the Claude desktop app's built-in browser, or a Playwright MCP server. If you have none, tell the PM the dry run needs one of these, set `"dryRun": "skipped"` in `validai-flows.json`, and go to **6. Verify and hand off**.
+2. **Start the local server** in the background, in the folder holding `validai-flows.json`:
+
+   ```
+   node ${CLAUDE_SKILL_DIR}/scripts/validai-share.mjs serve --flows validai-flows.json [build-dir]
+   ```
+
+   It prints one URL per flow. Each opens a tester screen: a bar with the step, **Show hint** (when the step has a hint), **Skip step** and (for self-report steps) **Done**, above the prototype. A step completes only when ValidAI would count it for a real tester. Every step outcome is printed by the server and saved to `validai-dryrun.json` next to the flows file. It is never uploaded. Add `validai-dryrun.json` to the project's `.gitignore` if it has one.
+3. **Walk each flow blind.** If you can start subagents, give each flow to a fresh one whose brief holds only the flow's URL, the browser tool, and this role: *"You are a first-time tester. Do each step from its instruction, as a tester would. Don't read page source or `data-` attributes. If you're lost after a fair try, use Show hint (if the step has one). If you're still lost, use Skip step. After 3 failed actions on one step, skip it and say why. Note anything confusing: wording, labels, what you expected to happen. Report, per step, what you tried and what confused you."* Without subagents, walk it yourself without opening source files during the walk, and say in the report that the run wasn't blind.
+4. **Combine** the walker's notes with `validai-dryrun.json`. Give each problem one type:
+   - **Not tracked:** the walker did the right thing but the step didn't complete. Use the recorded events and the source to find out why (a tag on a wrapper instead of the control, a tag on a `<select>` but not the chosen `<option>`, a `label` that doesn't match). If the flow has `"trackerMissing": true`, the cause is the build blocking injected scripts (often a Content-Security-Policy meta tag).
+   - **Couldn't complete:** a dead end, a missing screen, a page error, or steps in an order that can't be done.
+   - **Needed the hint:** flag it; it's fine for "find it" steps and never blocks.
+   - **Wording:** the instruction names the control it asks the tester to find, is ambiguous, or doesn't match the screen; or a question reads poorly.
+5. **Show the PM the report.** Start with this line, exactly: *"This checks that each flow works and reads clearly. It doesn't predict how testers will find it. Claude is more patient and more literal than real testers."* Then one block per flow: its name and how many steps worked, each step with ✓ or ✗ and any problem type, and for each problem the fix you propose.
+6. **Fix loop.** Make the fixes the PM approves (code, tags or flow text), rebuild, and run the dry run again on the flows you changed. Repeat until the PM is satisfied.
+7. **Record the result** in `validai-flows.json`: `"dryRun": "passed"` when every step completed without a skip, `"issues-accepted"` when the PM chose to go ahead with open problems, or `"skipped"` (item 1 above). Stop the server.
+
+## 6. Verify and hand off
 
 Then choose the hand-off:
 
@@ -135,7 +158,7 @@ It lists the prototype's open findings (tracked, not yet addressed by an iterati
    - `changes`: what a tester will notice, in plain words, one sentence per change (≤ 2000 characters). The PM reads it on Iteration comparison next to the before-and-after numbers.
    - `addressedFindings`: the `Finding id` of each finding your changes address, copied exactly from the brief or from `findings`. Leave out findings you didn't address. Before handing off, show the PM the list as titles ("These changes address: …") and let them add or remove any. Leave it empty only when the changes address no tracked finding (say so to the PM); the push then warns that the iteration isn't linked.
    - Keep `taskFlows` up to date for the new build: in ValidAI, task flows and invites are locked to the iteration they were made for, so the flows in this file are set up fresh on the new iteration. Keep each flow's `key` and step `key`s the same, so results still line up with the earlier iteration. Update a flow only where your changes affect its steps, and show the PM those step changes before handing off.
-4. Hand off the same way as step 5 (A, B or C). With an `iteration` block:
+4. Run the dry run (**5. Dry run**) on every flow, since a change to one screen can break steps in other flows. Then hand off the same way as **6. Verify and hand off** (A, B or C). With an `iteration` block:
    - **Push** starts the next iteration with the new build, then sets up the flows on it. It prints the new iteration number. Earlier iterations keep their flows, sessions and invites.
    - **Package**: the PM opens the prototype in ValidAI → **New Iteration** and drops the `.validai` file. It fills in what changed, ticks the findings, and sets up the flows.
    - Invites stay on their iteration: offer to create new invite links for the new flows (see **Create invite links**), and remind the PM to close the old ones in ValidAI → Invites when they stop testing the old version.

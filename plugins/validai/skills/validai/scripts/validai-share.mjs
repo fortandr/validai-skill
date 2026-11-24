@@ -3,8 +3,8 @@
 // cli/src/index.ts
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
-import { basename, join as join5, resolve as resolve2 } from "node:path";
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync5, realpathSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { basename, dirname, join as join5, resolve as resolve2 } from "node:path";
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync6, realpathSync, writeFileSync as writeFileSync4 } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // cli/src/config.ts
@@ -158,7 +158,7 @@ function resolveBundleDir(explicit, cwd, opts = {}) {
   }
   return dir;
 }
-var HELPER_FILES = /* @__PURE__ */ new Set(["validai-flows.json", "validai-share.mjs", "AGENTS.md"]);
+var HELPER_FILES = /* @__PURE__ */ new Set(["validai-flows.json", "validai-share.mjs", "AGENTS.md", "validai-dryrun.json"]);
 function excludedDir(name) {
   return name.startsWith(".") && name !== ".well-known" || name === "node_modules";
 }
@@ -219,7 +219,7 @@ function describeRootAbsolute(files) {
 }
 
 // cli/src/version.ts
-var HELPER_VERSION = true ? "2026.11.23" : "dev";
+var HELPER_VERSION = true ? "2026.11.24" : "dev";
 var CLIENT_HEADER = { "X-ValidAI-Client": `validai-share/${HELPER_VERSION}` };
 
 // cli/src/api.ts
@@ -322,6 +322,7 @@ import { resolve } from "node:path";
 
 // src/shared/flowManifest/types.ts
 var SCHEMA_VERSION = 1;
+var DRY_RUN_STATES = ["passed", "skipped", "issues-accepted"];
 
 // src/shared/iteration.ts
 var ITERATION_LIMITS = { changes: 2e3, findings: 100 };
@@ -349,12 +350,12 @@ var LIMITS = {
 var COMPLETION_TYPES = ["interaction", "appearance", "checklist", "self-report"];
 var RESPONSE_TYPES = ["scale", "choice", "reaction", "text"];
 var SOURCE_KINDS = ["in-person-validation", "transcript", "prd", "prototype-analysis", "other"];
-var TOP_KEYS = ["schemaVersion", "prototype", "generator", "source", "iteration", "taskFlows"];
+var TOP_KEYS = ["schemaVersion", "prototype", "generator", "source", "iteration", "dryRun", "taskFlows"];
 var ITERATION_KEYS = ["changes", "addressedFindings"];
 var FLOW_KEYS = ["key", "name", "description", "rationale", "testTitle", "testIntro", "steps", "endIntercepts"];
 var STEP_KEYS = ["key", "instruction", "completionMessage", "hint", "completionType", "target", "targets", "threshold", "intercept"];
 var TARGET_KEYS = ["tag", "label", "context"];
-var INTERCEPT_KEYS = ["trigger", "question", "responseType", "choices", "escalateOnLowScore", "followUpQuestion"];
+var INTERCEPT_KEYS = ["trigger", "question", "responseType", "choices", "escalateOnLowScore", "followUpQuestion", "purpose"];
 var isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 var join4 = (path, field) => path ? `${path}.${field}` : field;
 function formatIssue(issue) {
@@ -432,7 +433,7 @@ function validateManifest(raw) {
     const hasLabel = typeof t.label === "string" && t.label.trim() !== "";
     if (!hasTag && !hasLabel) err2("target-required", path, 'needs a "tag" or a "label"');
   }
-  function intercept(ic, path, triggers) {
+  function intercept(ic, path, triggers, allowPurpose = false) {
     if (!isObj(ic)) {
       err2("type", path, "must be an object");
       return;
@@ -460,6 +461,9 @@ function validateManifest(raw) {
       err2("type", join4(path, "escalateOnLowScore"), "must be true or false");
     }
     text(ic, "followUpQuestion", path, LIMITS.question, false);
+    if (ic.purpose !== void 0 && (!allowPurpose || ic.purpose !== "context")) {
+      err2("purpose-invalid", join4(path, "purpose"), allowPurpose ? 'must be "context"' : "is only allowed on session-end questions (endIntercepts)");
+    }
   }
   function step(s, path) {
     if (!isObj(s)) {
@@ -532,7 +536,7 @@ function validateManifest(raw) {
     if (f.endIntercepts !== void 0) {
       const ep = join4(path, "endIntercepts");
       if (!Array.isArray(f.endIntercepts)) err2("type", ep, "must be an array");
-      else f.endIntercepts.forEach((ic, i2) => intercept(ic, `${ep}[${i2}]`, ["session-end"]));
+      else f.endIntercepts.forEach((ic, i2) => intercept(ic, `${ep}[${i2}]`, ["session-end"], true));
     }
     return k;
   }
@@ -588,6 +592,9 @@ function validateManifest(raw) {
       }
     }
   }
+  if (raw.dryRun !== void 0 && !DRY_RUN_STATES.includes(raw.dryRun)) {
+    err2("dryrun-invalid", "dryRun", `must be one of ${DRY_RUN_STATES.join(", ")}`);
+  }
   if (!Array.isArray(raw.taskFlows) || raw.taskFlows.length === 0) {
     err2("empty-list", "taskFlows", "must list at least 1 task flow");
   } else {
@@ -601,6 +608,83 @@ function validateManifest(raw) {
     });
   }
   return { manifest: errors.length === 0 ? raw : null, errors, warnings };
+}
+
+// src/shared/flowManifest/map.ts
+function expectedActionFor(label, context) {
+  return context && context !== label ? `Click "${label}" in ${context.split("\n")[0].trim().slice(0, 80)}` : `Click "${label}"`;
+}
+function targetTextFor(label, context) {
+  if (!label) return void 0;
+  return context ? `${context}|${label}` : label;
+}
+function compact(o) {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== void 0));
+}
+function mapIntercept(ic, newId) {
+  return compact({
+    id: newId(),
+    trigger: ic.trigger,
+    question: ic.question.trim(),
+    responseType: ic.responseType,
+    choices: ic.responseType === "choice" ? (ic.choices ?? []).map((c) => c.trim()).filter((c) => c.length > 0) : void 0,
+    escalateOnLowScore: ic.responseType === "scale" ? ic.escalateOnLowScore : void 0,
+    followUpQuestion: ic.followUpQuestion?.trim() || void 0,
+    purpose: ic.purpose === "context" ? "context" : void 0
+  });
+}
+function mapChecklistTarget(t) {
+  return compact({ tag: t.tag, label: t.label, context: t.context, text: targetTextFor(t.label, t.context) });
+}
+function mapFlow(flow, target, ctx) {
+  const reuse = new Map(
+    (ctx.existing?.steps ?? []).filter((s) => s.importKey).map((s) => [s.importKey, s.id])
+  );
+  const steps = flow.steps.map((s, i2) => {
+    const type = s.completionType ?? "interaction";
+    const step = {
+      id: reuse.get(s.key) ?? ctx.newId(),
+      order: i2 + 1,
+      instruction: s.instruction.trim(),
+      expectedAction: "",
+      importKey: s.key,
+      completionType: type
+    };
+    const completionMessage = s.completionMessage?.trim();
+    if (completionMessage) step.completionMessage = completionMessage;
+    const hint = s.hint?.trim();
+    if (hint) step.hint = hint;
+    if ((type === "interaction" || type === "appearance") && s.target) {
+      const t = s.target;
+      Object.assign(step, compact({
+        targetTag: t.tag,
+        targetLabel: t.label,
+        targetContext: t.context,
+        targetText: targetTextFor(t.label, t.context)
+      }));
+      step.expectedAction = expectedActionFor(t.label || t.tag, t.context);
+    } else if (type === "checklist" && s.targets) {
+      step.checklistTargets = s.targets.map(mapChecklistTarget);
+      step.checklistThreshold = s.threshold ?? s.targets.length;
+    }
+    if (s.intercept) step.intercept = mapIntercept(s.intercept, ctx.newId);
+    return step;
+  });
+  return compact({
+    name: target.name,
+    description: flow.description?.trim() ?? "",
+    prototypeId: ctx.prototypeId,
+    steps,
+    endIntercepts: (flow.endIntercepts ?? []).map((ic) => mapIntercept(ic, ctx.newId)),
+    importKey: target.importKey,
+    importSource: ctx.source ? compact({ kind: ctx.source.kind, notes: ctx.source.notes?.trim() || void 0, importedAt: ctx.now }) : { kind: "other", importedAt: ctx.now },
+    rationale: flow.rationale?.trim() || void 0,
+    testTitle: flow.testTitle?.trim() || void 0,
+    testIntro: flow.testIntro?.trim() || void 0,
+    createdBy: ctx.uid,
+    createdAt: ctx.existing?.createdAt ?? ctx.now,
+    updatedAt: ctx.now
+  });
 }
 
 // src/shared/flowManifest/tagScan.ts
@@ -1521,6 +1605,362 @@ function packageFileName(manifest, fallbackName) {
   return `${suggestKey(manifest.prototype?.name || fallbackName) || "prototype"}.validai`;
 }
 
+// cli/src/serve.ts
+import { createServer } from "node:http";
+
+// cli/src/dryrun/record.ts
+import { existsSync as existsSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync3 } from "node:fs";
+var RECORD_FILE = "validai-dryrun.json";
+function emptyRecord() {
+  return { version: 1, flows: [] };
+}
+function applyEvent(file, event, now) {
+  const flows = file.flows.map((f) => ({ ...f, steps: [...f.steps] }));
+  if (event.type === "flow-start") {
+    const fresh = { flowKey: event.flowKey, startedAt: now, steps: [] };
+    const i2 = flows.findIndex((f) => f.flowKey === event.flowKey);
+    if (i2 >= 0) flows[i2] = fresh;
+    else flows.push(fresh);
+    return { version: 1, flows };
+  }
+  let flow = flows.find((f) => f.flowKey === event.flowKey);
+  if (!flow) {
+    flow = { flowKey: event.flowKey, startedAt: now, steps: [] };
+    flows.push(flow);
+  }
+  if (event.type === "step") {
+    const j = flow.steps.findIndex((s) => s.stepKey === event.step.stepKey);
+    if (j >= 0) flow.steps[j] = event.step;
+    else flow.steps.push(event.step);
+  } else if (event.type === "tracker-missing") {
+    flow.trackerMissing = true;
+  } else {
+    flow.finishedAt = now;
+  }
+  return { version: 1, flows };
+}
+var OUTCOME_TEXT = { completed: "completed", skipped: "skipped", "self-reported": "marked done" };
+function formatEventLine(event, flow) {
+  const name = `Flow "${flow?.name ?? event.flowKey}"`;
+  if (event.type === "flow-start") return `${name} started`;
+  if (event.type === "flow-end") return `${name} finished`;
+  if (event.type === "tracker-missing") return `${name} \u26A0 tracking isn't loading in this build`;
+  const s = event.step;
+  const n = (flow?.steps.findIndex((x2) => x2.key === s.stepKey) ?? -1) + 1;
+  const mark = s.outcome === "skipped" ? "\u2717" : "\u2713";
+  const hint = s.hintUsed ? ", needed the hint" : "";
+  const click = [...s.events].reverse().find((e) => e.type === "click" && (e.tag || e.label));
+  const clicked = s.outcome === "completed" && click ? ` (clicked ${click.tag ?? `"${click.label}"`})` : "";
+  const problems = s.problems.length > 0 ? ` \u26A0 ${s.problems.join("; ")}` : "";
+  return `${name} \xB7 step ${n > 0 ? n : s.stepKey} ${mark} ${OUTCOME_TEXT[s.outcome]}${hint}${clicked}${problems}`;
+}
+function readRecord(path) {
+  if (!existsSync4(path)) return emptyRecord();
+  try {
+    const parsed = JSON.parse(readFileSync5(path, "utf-8"));
+    return parsed && parsed.version === 1 && Array.isArray(parsed.flows) ? parsed : emptyRecord();
+  } catch {
+    return emptyRecord();
+  }
+}
+function writeRecord(path, file) {
+  writeFileSync3(path, JSON.stringify(file, null, 2) + "\n");
+}
+
+// cli/src/dryrun/screenFlow.ts
+function buildScreenFlow(flow) {
+  let n = 0;
+  const mapped = mapFlow(flow, { importKey: flow.key, name: flow.name }, {
+    uid: "dry-run",
+    prototypeId: "dry-run",
+    now: 0,
+    newId: () => `s${++n}`
+  });
+  const stepQuestions = {};
+  for (const s of flow.steps) if (s.intercept) stepQuestions[s.key] = [s.intercept.question];
+  return {
+    key: flow.key,
+    title: flow.testTitle?.trim() || flow.name,
+    ...flow.testIntro?.trim() ? { intro: flow.testIntro.trim() } : {},
+    steps: mapped.steps,
+    stepQuestions,
+    endQuestions: (flow.endIntercepts ?? []).map((q) => q.question)
+  };
+}
+
+// cli/src/serve.ts
+var DEFAULT_PORT = 4317;
+var PORT_TRIES = 20;
+var DEFAULT_IDLE_MS = 30 * 60 * 1e3;
+var MAX_BODY = 1024 * 1024;
+var TYPES = {
+  html: "text/html; charset=utf-8",
+  htm: "text/html; charset=utf-8",
+  js: "text/javascript; charset=utf-8",
+  mjs: "text/javascript; charset=utf-8",
+  css: "text/css; charset=utf-8",
+  json: "application/json; charset=utf-8",
+  svg: "image/svg+xml",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  ico: "image/x-icon",
+  woff: "font/woff",
+  woff2: "font/woff2",
+  ttf: "font/ttf",
+  txt: "text/plain; charset=utf-8"
+};
+function ext(path) {
+  const m = /\.([a-z0-9]+)$/i.exec(path);
+  return m ? m[1].toLowerCase() : "";
+}
+function injectDryRunTracker(html, origin) {
+  const script = `<script>window.__PROTOTEST_APP_ORIGIN=${JSON.stringify(origin)}</script>
+<script src="/__prototest_tracker.js"></script>`;
+  const bodyClose = html.lastIndexOf("</body>");
+  if (bodyClose !== -1) return html.slice(0, bodyClose) + script + "\n" + html.slice(bodyClose);
+  return html + "\n" + script;
+}
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+function screenPage(flowKey, name) {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>Dry run \xB7 ${escapeHtml(name)}</title>
+<style>
+  html,body{margin:0;height:100%;font:15px/1.4 system-ui,sans-serif;color:#111}
+  body{display:flex;flex-direction:column}
+  #bar{padding:12px 16px;border-bottom:1px solid #ddd;background:#f7f7fb;max-height:40vh;overflow:auto}
+  #bar button{font:inherit;margin:6px 8px 0 0;padding:6px 12px;border:1px solid #888;border-radius:6px;background:#fff;cursor:pointer}
+  #bar .warn{color:#a40000}
+  #app{flex:1;border:0;width:100%}
+</style></head>
+<body><div id="bar" aria-live="polite"></div><iframe id="app" src="/" title="Prototype"></iframe>
+<script>window.__DRYRUN_FLOW_KEY=${JSON.stringify(flowKey)}</script>
+<script src="/__dryrun/screen.js"></script>
+</body></html>`;
+}
+function cleanProblem(s) {
+  return s.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 300);
+}
+function isDryRunEvent(v, keys) {
+  if (!v || typeof v !== "object") return false;
+  const e = v;
+  if (typeof e.flowKey !== "string" || !keys.has(e.flowKey)) return false;
+  if (e.type === "flow-start" || e.type === "flow-end" || e.type === "tracker-missing") return true;
+  if (e.type !== "step" || !e.step || typeof e.step !== "object") return false;
+  const s = e.step;
+  return typeof s.stepKey === "string" && (s.outcome === "completed" || s.outcome === "skipped" || s.outcome === "self-reported") && typeof s.hintUsed === "boolean" && Array.isArray(s.events) && Array.isArray(s.problems);
+}
+function readBody(req) {
+  return new Promise((resolve3) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > MAX_BODY) {
+        resolve3(null);
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => resolve3(Buffer.concat(chunks).toString("utf-8")));
+    req.on("error", () => resolve3(null));
+  });
+}
+function listen(server, port) {
+  return new Promise((resolve3, reject) => {
+    const onError = (err2) => {
+      server.off("listening", onListening);
+      if (err2.code === "EADDRINUSE") resolve3(false);
+      else reject(err2);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve3(true);
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, "127.0.0.1");
+  });
+}
+async function startServe(opts) {
+  const log = opts.log ?? ((l) => console.log(l));
+  const now = opts.now ?? Date.now;
+  const idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
+  const files = new Map(opts.files.map((f) => [f.path, Buffer.from(f.contentBase64, "base64")]));
+  const flows = new Map(opts.manifest.taskFlows.map((f) => [f.key, f]));
+  const flowKeys = new Set(flows.keys());
+  let notFound = [];
+  let origin = "";
+  let port = -1;
+  function send(res, status, body, type = "text/plain; charset=utf-8") {
+    res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store" });
+    res.end(body);
+  }
+  function sendFile(res, path) {
+    const body = files.get(path);
+    const e = ext(path);
+    if (e === "html" || e === "htm") send(res, 200, injectDryRunTracker(body.toString("utf-8"), origin), TYPES.html);
+    else send(res, 200, body, TYPES[e] ?? "application/octet-stream");
+  }
+  async function handleEvent(req, res) {
+    if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+      send(res, 415, "Send application/json");
+      return;
+    }
+    const sentOrigin = req.headers.origin;
+    if (sentOrigin !== void 0 && sentOrigin !== origin && sentOrigin !== `http://localhost:${port}`) {
+      send(res, 403, "Forbidden");
+      return;
+    }
+    const text = await readBody(req);
+    let event;
+    try {
+      event = text === null ? null : JSON.parse(text);
+    } catch {
+      event = null;
+    }
+    if (!isDryRunEvent(event, flowKeys)) {
+      send(res, 400, "Bad event");
+      return;
+    }
+    if (event.type === "step") {
+      const problems = [...event.step.problems.filter((p) => typeof p === "string"), ...notFound].map(cleanProblem);
+      notFound = [];
+      event = { ...event, step: { ...event.step, problems } };
+    }
+    const e = event;
+    try {
+      writeRecord(opts.recordPath, applyEvent(readRecord(opts.recordPath), e, now()));
+    } catch (err2) {
+      log(`\u26A0 Couldn't save the dry run record: ${err2 instanceof Error ? err2.message : String(err2)}`);
+      send(res, 500, "Could not save the record");
+      return;
+    }
+    log(formatEventLine(e, flows.get(e.flowKey)));
+    res.writeHead(204).end();
+  }
+  function handle(req, res) {
+    if (req.headers.host !== `127.0.0.1:${port}` && req.headers.host !== `localhost:${port}`) {
+      send(res, 403, "Forbidden");
+      return;
+    }
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    let path;
+    try {
+      path = decodeURIComponent(url.pathname);
+    } catch {
+      send(res, 400, "Bad path");
+      return;
+    }
+    if (path === "/__dryrun/events" && req.method === "POST") {
+      void handleEvent(req, res);
+      return;
+    }
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      send(res, 405, "Method not allowed");
+      return;
+    }
+    if (path === "/__dryrun/screen.js") {
+      send(res, 200, opts.assets.screenJs, TYPES.js);
+      return;
+    }
+    if (path === "/__prototest_tracker.js") {
+      send(res, 200, opts.assets.trackerJs, TYPES.js);
+      return;
+    }
+    if (path === "/__prototest_rrweb_record.js") {
+      send(res, 200, "/* no recording in a dry run */", TYPES.js);
+      return;
+    }
+    const screen = /^\/__dryrun\/([a-z0-9-]+)(\/flow\.json)?$/.exec(path);
+    if (screen) {
+      const flow = flows.get(screen[1]);
+      if (!flow) {
+        send(res, 404, "No such flow");
+        return;
+      }
+      if (screen[2]) send(res, 200, JSON.stringify(buildScreenFlow(flow)), TYPES.json);
+      else send(res, 200, screenPage(flow.key, flow.name), TYPES.html);
+      return;
+    }
+    const rel = path.replace(/^\/+/, "");
+    const candidates = rel === "" || rel.endsWith("/") ? [`${rel}index.html`] : [rel, `${rel}/index.html`];
+    const hit = candidates.find((c) => files.has(c));
+    if (hit) {
+      sendFile(res, hit);
+      return;
+    }
+    if (ext(rel) === "" && files.has("index.html")) {
+      sendFile(res, "index.html");
+      return;
+    }
+    if (path === "/favicon.ico") {
+      send(res, 404, "Not found");
+      return;
+    }
+    notFound.push(`Not found: ${path}`);
+    log(`\u26A0 Not found: ${path}`);
+    send(res, 404, "Not found");
+  }
+  let idleTimer;
+  let resolveClosed;
+  const closed = new Promise((r) => {
+    resolveClosed = r;
+  });
+  const server = createServer((req, res) => {
+    resetIdle();
+    handle(req, res);
+  });
+  server.on("close", () => resolveClosed());
+  let closing = null;
+  function close() {
+    if (!closing) {
+      clearTimeout(idleTimer);
+      closing = new Promise((r) => {
+        server.close(() => r());
+        server.closeAllConnections();
+      });
+    }
+    return closing;
+  }
+  function resetIdle() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      log(`Stopped after ${Math.round(idleMs / 6e4)} minutes with no activity.`);
+      void close();
+    }, idleMs);
+    idleTimer.unref?.();
+  }
+  const first = opts.port ?? DEFAULT_PORT;
+  for (let p = first; p < first + PORT_TRIES; p += 1) {
+    if (await listen(server, p)) {
+      port = p;
+      break;
+    }
+  }
+  if (port < 0) throw new Error(`No free port from ${first} to ${first + PORT_TRIES - 1}. Pass --port to choose another.`);
+  origin = `http://127.0.0.1:${port}`;
+  resetIdle();
+  return {
+    origin,
+    urls: opts.manifest.taskFlows.map((f) => ({ flowKey: f.key, name: f.name, url: `${origin}/__dryrun/${f.key}` })),
+    recordPathForTests: opts.recordPath,
+    close,
+    closed
+  };
+}
+
+// cli/src/dryrun/assets.ts
+function embeddedAssets() {
+  if (false) return null;
+  return { trackerJs: "(function () {\n  'use strict';\n  if (window.__prototest_tracker) return;\n  window.__prototest_tracker = true;\n\n  var BATCH_INTERVAL = 2000;\n  var RAGE_THRESHOLD = 3;\n  var RAGE_WINDOW = 800;\n  var SCROLL_THROTTLE = 1000;\n  var buffer = [];\n  var clickLog = []; // {target, time} for rage detection\n  var maxScrollPct = 0;\n  var pageEnterTime = Date.now();\n\n  // A path-token segment (~t.<token>, a bearer credential with\n  // bundle.pathToken on) right after a /__bundle/<pid>/<ver>/ or\n  // /__proxy/<enc>/ prefix, anywhere in a string. The token match is the\n  // token's own alphabet (base64url \".\" base64url, see server/pathToken.ts), so\n  // what follows it is kept; a `/` that ends it goes too, a `?`/`#` stays. A\n  // `~t.` that does not follow such a prefix is not a token and is left alone.\n  // Shared by cleanUrl and the rrweb recording scrub below.\n  var RECORDED_PATH_TOKEN_RE =\n    /(\\/__(?:bundle\\/[^\\/?#\\s\"'`()<>\\\\]+\\/[^\\/?#\\s\"'`()<>\\\\]+|proxy\\/[A-Za-z0-9_-]+)\\/)(?:~t\\.[A-Za-z0-9_.-]*\\/?)+/g;\n\n  // Strip the proxy prefix and every path-token segment from URLs for clean\n  // reporting: the page's own, and any tokenised URL the page echoes in its\n  // query (a `?r=` return path, Task 4 re-review O1).\n  function cleanUrl(url) {\n    if (url.indexOf('~t.') !== -1) url = url.replace(RECORDED_PATH_TOKEN_RE, '$1');\n    return url.replace(/\\/__proxy\\/[A-Za-z0-9_-]+/, '');\n  }\n\n  function getSelector(el) {\n    if (!el || !el.tagName) return '';\n    var parts = [el.tagName.toLowerCase()];\n    if (el.id) parts.push('#' + el.id);\n    if (el.className && typeof el.className === 'string') {\n      var classes = el.className.trim().split(/\\s+/).slice(0, 3).join('.');\n      if (classes) parts.push('.' + classes);\n    }\n    return parts.join('');\n  }\n\n  function getLabel(el) {\n    if (!el) return '';\n    var text = el.getAttribute('aria-label')\n      || el.getAttribute('title')\n      || (el.innerText || '').trim().slice(0, 60);\n    return text;\n  }\n\n  // Get text context from parent/ancestor elements (for compound matching)\n  function getContext(el) {\n    if (!el) return '';\n    var parts = [];\n    var node = el;\n    for (var i = 0; i < 5 && node && node !== document.body; i++) {\n      var text = (node.innerText || '').trim().slice(0, 200);\n      if (text) parts.push(text);\n      node = node.parentElement;\n    }\n    return parts.join(' | ');\n  }\n\n  // data-validai-target of the element or its closest tagged ancestor. closest()\n  // because clicks usually land on a child span/icon inside the tagged control.\n  function getValidaiTarget(el) {\n    var node = el && el.closest ? el.closest('[data-validai-target]') : null;\n    return node ? node.getAttribute('data-validai-target') || '' : '';\n  }\n\n  // Tag for a <select> change: the chosen <option>'s own tag (or a tagged\n  // element between it and the select, e.g. an <optgroup>) when present, so\n  // options of one select stay distinguishable; otherwise the select's tag.\n  function getSelectValidaiTarget(sel) {\n    var opt = sel.options && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;\n    var node = opt && opt.closest ? opt.closest('[data-validai-target]') : null;\n    if (node && node !== sel && sel.contains(node)) {\n      var own = node.getAttribute('data-validai-target') || '';\n      if (own) return { tag: own, fromOption: true };\n    }\n    return { tag: getValidaiTarget(sel), fromOption: false };\n  }\n\n  // Clicks that only open a <select> (or land on an <option>) or put the caret\n  // in a text field are not the interaction itself: the choice is judged from\n  // the select's change event, and typing from the field's change. Such clicks\n  // carry no validaiTarget and are flagged so tagged targets aren't text-matched.\n  var NON_TEXT_INPUT_TYPES = { button: 1, submit: 1, reset: 1, checkbox: 1, radio: 1, image: 1, file: 1, color: 1, range: 1 };\n  function isFieldClick(el) {\n    if (!el || !el.closest) return false;\n    if (el.closest('select, option')) return true;\n    if (el.tagName === 'TEXTAREA') return true;\n    if (el.tagName === 'INPUT') return !NON_TEXT_INPUT_TYPES[(el.getAttribute('type') || 'text').toLowerCase()];\n    return false;\n  }\n\n  function emit(type, data) {\n    buffer.push({\n      type: type,\n      timestamp: Date.now(),\n      url: cleanUrl(location.href),\n      data: data || {}\n    });\n  }\n\n  // --- Click tracking ---\n  document.addEventListener('click', function (e) {\n    var t = e.target;\n    var now = Date.now();\n    var sel = getSelector(t);\n\n    var clickData = {\n      selector: sel,\n      label: getLabel(t),\n      context: getContext(t),\n      tag: t.tagName,\n      x: e.clientX,\n      y: e.clientY,\n      pageX: e.pageX,\n      pageY: e.pageY\n    };\n    if (isFieldClick(t)) {\n      clickData.fieldClick = true;\n    } else {\n      var vt = getValidaiTarget(t);\n      if (vt) clickData.validaiTarget = vt;\n    }\n    emit('click', clickData);\n\n    // Rage click detection\n    clickLog.push({ selector: sel, time: now });\n    clickLog = clickLog.filter(function (c) { return now - c.time < RAGE_WINDOW; });\n    var sameTarget = clickLog.filter(function (c) { return c.selector === sel; });\n    if (sameTarget.length >= RAGE_THRESHOLD) {\n      emit('rage-click', { selector: sel, label: getLabel(t), clicks: sameTarget.length });\n      clickLog = [];\n    }\n  }, true);\n\n  // --- Navigation tracking ---\n  var lastPath = location.href;\n\n  function checkNav() {\n    if (location.href !== lastPath) {\n      emit('navigation', { from: cleanUrl(lastPath), to: cleanUrl(location.href) });\n      lastPath = location.href;\n    }\n  }\n\n  var origPush = history.pushState;\n  var origReplace = history.replaceState;\n  history.pushState = function () {\n    origPush.apply(this, arguments);\n    checkNav();\n  };\n  history.replaceState = function () {\n    origReplace.apply(this, arguments);\n    checkNav();\n  };\n  window.addEventListener('popstate', checkNav);\n\n  // --- Scroll depth + position ---\n  var scrollTimer = null;\n  window.addEventListener('scroll', function () {\n    if (scrollTimer) return;\n    scrollTimer = setTimeout(function () {\n      scrollTimer = null;\n      var docHeight = Math.max(\n        document.body.scrollHeight,\n        document.documentElement.scrollHeight\n      );\n      var viewHeight = window.innerHeight;\n      var scrollTop = window.scrollY || document.documentElement.scrollTop;\n      var pct = docHeight <= viewHeight ? 100 : Math.round(((scrollTop + viewHeight) / docHeight) * 100);\n      if (pct > maxScrollPct) maxScrollPct = pct;\n      emit('scroll', { scrollTop: scrollTop, scrollPct: pct, maxScrollPct: maxScrollPct });\n    }, SCROLL_THROTTLE);\n  }, { passive: true });\n\n  // --- Mouse movement (10fps throttled) ---\n  var MOUSE_INTERVAL = 100; // 10fps\n  var lastMouseEmit = 0;\n  var mouseBuffer = [];\n  var mouseFlushTimer = null;\n\n  document.addEventListener('mousemove', function (e) {\n    var now = Date.now();\n    if (now - lastMouseEmit < MOUSE_INTERVAL) return;\n    lastMouseEmit = now;\n    mouseBuffer.push({\n      x: e.clientX,\n      y: e.clientY,\n      t: now\n    });\n  }, { passive: true });\n\n  // Batch mouse positions into single events every 2 seconds\n  setInterval(function () {\n    if (mouseBuffer.length === 0) return;\n    var batch = mouseBuffer.slice();\n    mouseBuffer = [];\n    emit('mousemove', { positions: batch });\n  }, BATCH_INTERVAL);\n\n  // --- Form interactions ---\n  // Focus deliberately carries no validaiTarget: focusing a tagged control is\n  // not the interaction a step expects, and a tag would make it a match.\n  document.addEventListener('focus', function (e) {\n    var t = e.target;\n    if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') {\n      emit('form-interaction', {\n        action: 'focus',\n        field: t.name || t.id || getSelector(t),\n        inputType: t.type || t.tagName.toLowerCase()\n      });\n    }\n  }, true);\n\n  document.addEventListener('change', function (e) {\n    var t = e.target;\n    if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') {\n      var data = {\n        action: 'change',\n        field: t.name || t.id || getSelector(t),\n        inputType: t.type || t.tagName.toLowerCase()\n      };\n      // For selects, capture the selected option text (not value) for auto-complete matching\n      if (t.tagName === 'SELECT' && t.options && t.selectedIndex >= 0) {\n        data.selectedText = t.options[t.selectedIndex].textContent.trim();\n        data.label = data.selectedText;\n        data.context = getContext(t);\n      }\n      if (t.tagName === 'SELECT') {\n        var svt = getSelectValidaiTarget(t);\n        if (svt.tag) data.validaiTarget = svt.tag;\n        if (svt.tag && svt.fromOption) data.validaiTargetFromOption = true;\n      } else {\n        var vt = getValidaiTarget(t);\n        if (vt) data.validaiTarget = vt;\n      }\n      emit('form-interaction', data);\n    }\n  }, true);\n\n  // --- Page enter ---\n  emit('page-enter', {\n    viewport: { width: window.innerWidth, height: window.innerHeight },\n    screenSize: { width: screen.width, height: screen.height },\n    userAgent: navigator.userAgent,\n    referrer: document.referrer ? cleanUrl(document.referrer) : ''\n  });\n\n  // --- Viewport resize ---\n  var resizeTimer = null;\n  window.addEventListener('resize', function () {\n    clearTimeout(resizeTimer);\n    resizeTimer = setTimeout(function () {\n      emit('viewport-resize', { width: window.innerWidth, height: window.innerHeight });\n    }, 500);\n  });\n\n  // --- Page exit ---\n  window.addEventListener('beforeunload', function () {\n    emit('page-exit', {\n      timeOnPage: Math.round((Date.now() - pageEnterTime) / 1000),\n      maxScrollPct: maxScrollPct\n    });\n    flush();\n  });\n\n  // --- rrweb DOM Recording ---\n  // Recording-batch token scrub. With bundle.pathToken on, this page's URL holds\n  // a `~t.<token>` bearer segment right after /__bundle/<pid>/<ver>/ or\n  // /__proxy/<enc>/, and rrweb records it (Meta href, absolutised src/href/\n  // srcset, inlined CSS, mutations). Stored recordings must never hold a usable\n  // token, so every batch is walked (arrays and plain objects; string values\n  // only) and every leading token segment is dropped from bundle/proxy URLs,\n  // like splitPathToken: a `/` that ends it goes too, a `?`/`#` stays. The token\n  // match is the token's own alphabet (base64url \".\" base64url, see\n  // server/pathToken.ts), so text after it (`,` in a compact srcset, prose) is\n  // kept. Copy-on-write: unchanged events are posted as the very same objects\n  // (no token == no-op), and rrweb's own event objects are never mutated.\n  // Fails closed: if the walk throws, the same regex runs over the serialised\n  // batch (its classes exclude `\"` and `\\`, so a match never leaves a JSON\n  // string); if that fails too the batch is dropped, never posted unscrubbed.\n  // (RECORDED_PATH_TOKEN_RE is defined with cleanUrl, at the top.)\n  //\n  // Skipped entirely while this page's URL has never held a `~t.` segment\n  // (final review, finding 9): a token can only reach the recording through\n  // the page's own URL or one it echoes, so with the flag off (or any untokenised\n  // page) the walk is pure cost. Latched: once the URL has held one, every later\n  // batch is scrubbed even after a pushState away from it (absolutised URLs\n  // already in the DOM still carry the token). If location cannot be read, it\n  // scrubs (fail closed).\n  var pageHadPathToken = false;\n  function pageHasPathToken() {\n    if (!pageHadPathToken) {\n      try { pageHadPathToken = String(window.location.href).indexOf('~t.') !== -1; } catch (e) { pageHadPathToken = true; }\n    }\n    return pageHadPathToken;\n  }\n  function scrubRecordedTokens(value) {\n    if (typeof value === 'string') {\n      return value.indexOf('~t.') === -1 ? value : value.replace(RECORDED_PATH_TOKEN_RE, '$1');\n    }\n    if (!value || typeof value !== 'object') return value;\n    var copy = null;\n    var i, v;\n    if (Array.isArray(value)) {\n      for (i = 0; i < value.length; i++) {\n        v = scrubRecordedTokens(value[i]);\n        if (v !== value[i]) { if (!copy) copy = value.slice(); copy[i] = v; }\n      }\n      return copy || value;\n    }\n    if (Object.prototype.toString.call(value) !== '[object Object]') return value;\n    for (var k in value) {\n      if (!Object.prototype.hasOwnProperty.call(value, k)) continue;\n      v = scrubRecordedTokens(value[k]);\n      if (v !== value[k]) {\n        if (!copy) { copy = {}; for (var k2 in value) { if (Object.prototype.hasOwnProperty.call(value, k2)) copy[k2] = value[k2]; } }\n        copy[k] = v;\n      }\n    }\n    return copy || value;\n  }\n  function scrubRecordingBatch(events) {\n    if (!pageHasPathToken()) return events;\n    try { return scrubRecordedTokens(events); } catch (e) { /* fall through to the text scrub */ }\n    try {\n      var text = JSON.stringify(events);\n      return JSON.parse(text.indexOf('~t.') === -1 ? text : text.replace(RECORDED_PATH_TOKEN_RE, '$1'));\n    } catch (e2) {\n      console.warn('[tracker] recording batch dropped: could not scrub path tokens');\n      return [];\n    }\n  }\n\n  // Set once rrweb is recording: posts the pending rrweb events immediately.\n  var flushRecordingNow = null;\n\n  var rrwebScript = document.createElement('script');\n  rrwebScript.src = '/__prototest_rrweb_record.js';\n  rrwebScript.onload = function () {\n    if (!window.rrwebRecord) {\n      console.warn('[tracker] rrweb record not available');\n      return;\n    }\n\n    var rrwebEvents = [];\n\n    function startRrwebRecording() {\n      window.__rrwebStopFn = window.rrwebRecord({\n        emit: function (event) {\n          rrwebEvents.push(event);\n        },\n        recordCrossOriginIframes: false,\n        maskAllInputs: false,\n      });\n\n      // Flush rrweb events to parent every 5 seconds\n      setInterval(function () {\n        if (rrwebEvents.length === 0) return;\n        var batch = rrwebEvents.slice();\n        rrwebEvents = [];\n        if (window.parent !== window) {\n          window.parent.postMessage({\n            type: 'PROTOTEST_RECORDING_BATCH',\n            events: scrubRecordingBatch(batch),\n          }, window.__PROTOTEST_APP_ORIGIN || '*');\n        }\n      }, 5000);\n\n      // On request (End Session): post what's pending now, flagged as the reply.\n      flushRecordingNow = function () {\n        var pending = rrwebEvents;\n        rrwebEvents = [];\n        window.parent.postMessage({\n          type: 'PROTOTEST_RECORDING_BATCH',\n          events: scrubRecordingBatch(pending),\n          flush: true,\n        }, window.__PROTOTEST_APP_ORIGIN || '*');\n      };\n\n      // Final flush on page unload\n      window.addEventListener('beforeunload', function () {\n        if (rrwebEvents.length > 0 && window.parent !== window) {\n          window.parent.postMessage({\n            type: 'PROTOTEST_RECORDING_BATCH',\n            events: scrubRecordingBatch(rrwebEvents),\n          }, window.__PROTOTEST_APP_ORIGIN || '*');\n        }\n      });\n\n      console.log('[tracker] rrweb recording started');\n    }\n\n    // Take rrweb's initial full snapshot only AFTER the prototype has rendered.\n    // SPAs (React/Vue/etc.) mount asynchronously \u2014 and even slower through the proxy \u2014\n    // so recording immediately captures an EMPTY snapshot (blank #root), which replays\n    // as a black screen with only the mouse cursor. Static HTML prototypes pass on the\n    // first check. Capped at 10s so a genuinely content-less prototype still records.\n    function hasRenderedContent() {\n      var root = document.querySelector('#root, #app, [data-reactroot], main') || document.body;\n      return !!(root && root.children && root.children.length > 0 &&\n        (document.body.textContent || '').trim().length > 0);\n    }\n    var waitedMs = 0;\n    (function waitForRender() {\n      if (hasRenderedContent() || waitedMs >= 10000) {\n        startRrwebRecording();\n        return;\n      }\n      waitedMs += 200;\n      setTimeout(waitForRender, 200);\n    })();\n  };\n  rrwebScript.onerror = function () {\n    console.warn('[tracker] Failed to load rrweb record module');\n  };\n  document.head.appendChild(rrwebScript);\n\n  // --- Appearance detection (completionType: 'appearance') ---\n  // Watches for a target element to appear (and become visible) in the DOM,\n  // then reports it to the parent via a dedicated postMessage channel. This\n  // never calls emit() \u2014 it must add zero persisted clickstream events.\n  var appearanceObserver = null;\n  var appearanceSelector = null;\n  var appearanceLabel = null;\n  var appearanceFired = false;\n  var APPEARANCE_THROTTLE = 200;\n  var appearanceThrottleTimer = null;\n  var appearanceThrottlePending = false;\n\n  // Visibility rule mirrors src/utils/stepCompletion.ts `isElementVisible`:\n  // an element is visible when it has a nonzero layout box OR an offsetParent.\n  // Duplicated here because this plain-JS injected file cannot import from\n  // the app's TS sources.\n  function isElementVisible(el) {\n    if (!el) return false;\n    try {\n      var rect = el.getBoundingClientRect();\n      var hasBox = rect.width > 0 && rect.height > 0;\n      // offsetParent is HTML-only; on non-HTMLElements (e.g. SVGElement) it's\n      // undefined, and undefined !== null would wrongly read as \"visible\".\n      // Only trust it for actual HTMLElements \u2014 everything else relies on hasBox.\n      var hasOffsetParent = el instanceof HTMLElement ? el.offsetParent !== null : false;\n      return hasBox || hasOffsetParent;\n    } catch (e) {\n      return false;\n    }\n  }\n\n  // Finds a visible element matching the current watch request, or null.\n  // Selector-based match takes priority. The label fallback matches only the\n  // element that DIRECTLY renders the label \u2014 one of its own child text nodes\n  // contains the substring \u2014 rather than any element whose aggregated\n  // textContent contains it. This is a single O(n) pass (no per-candidate\n  // descendant re-scan) and inherently skips containers like <body> that only\n  // aggregate the label from a descendant, so pre-existing page text (e.g. a\n  // nav link) can't false-positive before the real target renders. Exceptions\n  // (e.g. a bad selector) are caught by checkAppearance's try/catch.\n  function findAppearanceMatch() {\n    if (appearanceSelector) {\n      var el = document.querySelector(appearanceSelector);\n      return isElementVisible(el) ? el : null;\n    }\n    if (appearanceLabel) {\n      var needle = appearanceLabel.toLowerCase();\n      var all = document.querySelectorAll('*');\n      for (var i = 0; i < all.length; i++) {\n        var candidate = all[i];\n        if (!isElementVisible(candidate)) continue;\n        var nodes = candidate.childNodes;\n        for (var k = 0; k < nodes.length; k++) {\n          var n = nodes[k];\n          if (n.nodeType === 3 && (n.nodeValue || '').toLowerCase().indexOf(needle) !== -1) {\n            return candidate;\n          }\n        }\n      }\n    }\n    return null;\n  }\n\n  function disconnectAppearanceObserver() {\n    if (appearanceObserver) {\n      appearanceObserver.disconnect();\n      appearanceObserver = null;\n    }\n    if (appearanceThrottleTimer) {\n      clearTimeout(appearanceThrottleTimer);\n      appearanceThrottleTimer = null;\n    }\n    appearanceThrottlePending = false;\n  }\n\n  function checkAppearance() {\n    if (appearanceFired) return;\n    var match;\n    try {\n      match = findAppearanceMatch();\n    } catch (e) {\n      return; // bad selector or similar \u2014 never let this crash the prototype\n    }\n    if (!match) return;\n    appearanceFired = true;\n    disconnectAppearanceObserver();\n    try {\n      window.parent.postMessage({\n        type: 'PROTOTEST_APPEARANCE',\n        selector: appearanceSelector,\n        label: appearanceLabel\n      }, window.__PROTOTEST_APP_ORIGIN || '*');\n    } catch (e) { /* ignore */ }\n  }\n\n  // Throttled MutationObserver callback so a busy DOM doesn't thrash checks.\n  function onAppearanceMutation() {\n    if (appearanceThrottlePending) return;\n    appearanceThrottlePending = true;\n    appearanceThrottleTimer = setTimeout(function () {\n      appearanceThrottlePending = false;\n      appearanceThrottleTimer = null;\n      try {\n        checkAppearance();\n      } catch (e) { /* never let observer crash the prototype */ }\n    }, APPEARANCE_THROTTLE);\n  }\n\n  function startWatchingAppearance(selector, label) {\n    disconnectAppearanceObserver();\n    appearanceSelector = selector || null;\n    appearanceLabel = label || null;\n    appearanceFired = false;\n\n    checkAppearance(); // element may already be present\n    if (appearanceFired) return;\n\n    try {\n      appearanceObserver = new MutationObserver(onAppearanceMutation);\n      appearanceObserver.observe(document, {\n        childList: true,\n        subtree: true,\n        attributes: true\n      });\n    } catch (e) { /* ignore \u2014 environment without MutationObserver support */ }\n  }\n\n  function clearWatchingAppearance() {\n    disconnectAppearanceObserver();\n    appearanceSelector = null;\n    appearanceLabel = null;\n    appearanceFired = false;\n  }\n\n  window.addEventListener('message', function (e) {\n    var msg = e.data;\n    if (!msg || typeof msg !== 'object') return;\n    try {\n      if (msg.type === 'PROTOTEST_WATCH_APPEARANCE') {\n        startWatchingAppearance(msg.selector, msg.label);\n      } else if (msg.type === 'PROTOTEST_CLEAR_APPEARANCE') {\n        clearWatchingAppearance();\n      } else if (msg.type === 'PROTOTEST_SURVEY_MARK') {\n        if (msg.phase === 'open' || msg.phase === 'close') {\n          if (window.rrwebRecord && typeof window.rrwebRecord.addCustomEvent === 'function') {\n            window.rrwebRecord.addCustomEvent('validai-survey', { phase: msg.phase });\n          }\n        }\n      } else if (msg.type === 'PROTOTEST_FLUSH_RECORDING') {\n        // End Session: post pending recording events now rather than on the next\n        // 5 s tick, which would never come once the page navigates away. Always\n        // answer (even with nothing) so the parent can stop waiting early.\n        if (e.source !== window.parent) return;\n        if (flushRecordingNow) {\n          flushRecordingNow();\n        } else {\n          window.parent.postMessage({ type: 'PROTOTEST_RECORDING_BATCH', events: [], flush: true },\n            window.__PROTOTEST_APP_ORIGIN || '*');\n        }\n      } else if (msg.type === 'PROTOTEST_RRWEB_SNAPSHOT') {\n        // The run just became active: start the uploaded recording at a fresh\n        // Meta + FullSnapshot (batches from before Start were never uploaded).\n        // Only the embedding app page may ask. Before rrweb has started (content\n        // not rendered yet) this is a no-op: the first snapshot comes on its own.\n        if (e.source !== window.parent) return;\n        if (window.__rrwebStopFn && window.rrwebRecord &&\n            typeof window.rrwebRecord.takeFullSnapshot === 'function') {\n          window.rrwebRecord.takeFullSnapshot(true);\n        }\n      }\n    } catch (e2) { /* never let inbound messages crash the prototype */ }\n  });\n\n  // Tell the parent this tracker's inbound message listener is now live.\n  // Guards against a race where an `appearance` step is first in the flow:\n  // the parent may post PROTOTEST_WATCH_APPEARANCE before this listener\n  // exists, silently dropping it. On receiving this signal, the parent\n  // re-posts the watch for whichever appearance step is currently active.\n  try {\n    if (window.parent && window.parent !== window) {\n      window.parent.postMessage({ type: 'PROTOTEST_TRACKER_READY' }, window.__PROTOTEST_APP_ORIGIN || '*');\n    }\n  } catch (e) { /* ignore */ }\n\n  // --- Batch flush via postMessage ---\n  function flush() {\n    if (buffer.length === 0) return;\n    var batch = buffer.slice();\n    buffer = [];\n    try {\n      window.parent.postMessage({ type: 'PROTOTEST_EVENTS', events: batch }, window.__PROTOTEST_APP_ORIGIN || '*');\n    } catch (e) { /* ignore */ }\n  }\n\n  setInterval(flush, BATCH_INTERVAL);\n\n  // --- Page probe ---\n  // Report a sample of the visible text a few seconds after each page/route change, so\n  // the parent can tell testers when the app didn't load (e.g. an app's own bare\n  // \"Not Found\" page, or a sign-in wall). Judgement lives in src/utils/loadProblem.ts.\n  var probeTimer = null;\n  function scheduleProbe() {\n    clearTimeout(probeTimer);\n    probeTimer = setTimeout(function () {\n      if (window.parent === window) return;\n      var text = (document.body && document.body.innerText) || '';\n      try {\n        window.parent.postMessage({ type: 'PROTOTEST_PAGE_PROBE', text: text.slice(0, 500) }, window.__PROTOTEST_APP_ORIGIN || '*');\n      } catch (e) { /* ignore */ }\n    }, 3000);\n  }\n  scheduleProbe();\n  var probePush = history.pushState;\n  history.pushState = function () { probePush.apply(this, arguments); scheduleProbe(); };\n  window.addEventListener('popstate', scheduleProbe);\n})();\n", screenJs: '"use strict";(()=>{var $=/^[a-z0-9][a-z0-9-]{0,63}$/;function k(e){var t;return(t=e.completionType)!=null?t:"interaction"}function Y(e){var r,s;let t=(s=(r=e.checklistTargets)==null?void 0:r.length)!=null?s:0,n=e.checklistThreshold;return typeof n=="number"&&Number.isInteger(n)&&n>0&&n<=t?n:t}function M(e,t){var i,a;let n=(a=(i=t.checklistTargets)==null?void 0:i.length)!=null?a:0,r=Y(t);if(r<=0)return!1;let s=new Set;for(let c of e)Number.isInteger(c)&&c>=0&&c<n&&s.add(c);return s.size>=r}function I(e){let t=e.targetTag&&$.test(e.targetTag)?e.targetTag:void 0,n=t?`[data-validai-target="${t}"]`:e.targetSelector,r=e.targetLabel||e.targetText;return!n&&!r?null:{selector:n,label:r}}function O(e,t){let n=I(e);return n?n.selector?t.selector===n.selector:!!n.label&&t.label===n.label:!1}function V(e){let t=e.trim(),n=/^[\\s\\S]*?[.!?](?=\\s|$)/.exec(t);return(n?n[0]:t).trim()}function _(e){var r;let t=(r=e.completionMessage)==null?void 0:r.trim();if(t)return t;if(k(e)==="self-report")return"Marked done";let n=V(e.instruction);return n?`Step complete \\u2014 ${n}`:"Step complete."}function x(e){return e.replace(/\\s*\\(\\d+\\)\\s*$/,"").trim()}function F(e){let t=e.match(/#[A-Za-z0-9_-]+/);return t?t[0]:""}function C(e,t){if(!e||!t)return!1;if(e===t)return!0;let n=F(e),r=F(t);return n!==""&&n===r}function v(e,t,n){if(!n)return!1;let r=x((e||"").toLowerCase().trim()),s=(t||"").toLowerCase().trim();if(!r&&!s)return!1;let i=n.split("|").map(g=>x(g.trim().toLowerCase())).filter(Boolean);if(i.length===0)return!1;if(i.length===1)return r.includes(i[0])||r===i[0];let a=i[i.length-1],c=i.slice(0,-1),p=r.includes(a),f=c.every(g=>s.includes(g));return p&&f}function W(e,t){return!t||!e?"fallthrough":e===t?"match":"no-match"}function L(e){return x(e.toLowerCase().replace(/\\s+/g," ").trim())}function w(e,t){if(e.fieldClick&&t.tag)return"no-match";let n=W(e.tag,t.tag);return n!=="match"?n:e.selectedText&&t.label&&!e.tagFromOption?L(e.selectedText)===L(t.label)?"match":"no-match":"match"}function N(e,t,n,r="",s="",i={}){return n.findIndex(a=>{var p,f;let c=w({tag:s,...i},a);return c!=="fallthrough"?c==="match":a.selector&&C(r,a.selector)||v(e,t,(f=(p=a.text)!=null?p:a.label)!=null?f:"")})}var U=new Set(["click","navigation","form-interaction"]);function D(e){let t=e.data.label||e.data.selectedText||"",n=e.data.context||"",r=e.data.selector||"",s=e.data.validaiTarget||"",i={selectedText:e.data.selectedText||void 0,tagFromOption:e.data.validaiTargetFromOption===!0,fieldClick:e.data.fieldClick===!0};return{label:t,context:n,selector:r,tag:s,select:i}}function j(e,t){var s,i;if(!e)return{single:!1,checklistHits:[]};let n=k(e),r=t.filter(a=>U.has(a.type));if(n==="interaction"){for(let a of r){let{label:c,context:p,selector:f,tag:g,select:y}=D(a),h=w({tag:g,...y},{tag:e.targetTag,label:e.targetLabel});if(h==="match")return{single:!0,checklistHits:[]};if(h!=="no-match"){if(e.targetSelector&&C(f,e.targetSelector))return{single:!0,checklistHits:[]};if(v(c,p,(s=e.targetText)!=null?s:""))return{single:!0,checklistHits:[]}}}return{single:!1,checklistHits:[]}}if(n==="checklist"){let a=[];for(let c of r){let{label:p,context:f,selector:g,tag:y,select:h}=D(c),S=N(p,f,(i=e.checklistTargets)!=null?i:[],g,y,h);S>=0&&a.push(S)}return{single:!1,checklistHits:a}}return{single:!1,checklistHits:[]}}var B=50;function K(){return{phase:"intro",index:0,hintShown:!1,checklistHits:[],events:[],problems:[],completedCount:0}}function z(e){var s;let t=(s=e.data)!=null?s:{},n=t.label||t.selectedText||void 0,r=t.validaiTarget||void 0;return{type:e.type,...n?{label:n}:{},...r?{tag:r}:{},...e.url?{url:e.url}:{}}}function H(e,t,n){let r={...t,phase:"step",index:n,hintShown:!1,checklistHits:[],events:[],problems:[]},s=e.steps[n],i=[];if(k(s)==="appearance"){let a=I(s);a&&i.push({kind:"watch-appearance",...a})}return{state:r,outputs:i}}function T(e,t,n){var i;let r=e.steps[t.index],s=[{kind:"post",event:{type:"step",flowKey:e.key,step:{stepKey:(i=r.importKey)!=null?i:r.id,outcome:n,hintUsed:t.hintShown,events:t.events,problems:t.problems}}}];return k(r)==="appearance"&&s.push({kind:"clear-appearance"}),{state:{...t,phase:"completed",completedCount:t.completedCount+(n==="skipped"?0:1)},outputs:s}}function P(e,t,n){let r={state:t,outputs:[]};if(n.kind==="problem")return t.phase==="step"?{state:{...t,problems:[...t.problems,n.message]},outputs:[]}:r;if(t.phase==="intro"){if(n.kind!=="start")return r;let a=H(e,t,0);return{state:a.state,outputs:[{kind:"post",event:{type:"flow-start",flowKey:e.key}},...a.outputs]}}if(t.phase==="completed")return n.kind!=="continue"?r:t.index+1>=e.steps.length?{state:{...t,phase:"finished"},outputs:[{kind:"post",event:{type:"flow-end",flowKey:e.key}}]}:H(e,t,t.index+1);if(t.phase!=="step")return r;let s=e.steps[t.index],i=k(s);switch(n.kind){case"show-hint":return s.hint?{state:{...t,hintShown:!0},outputs:[]}:r;case"skip":return T(e,t,"skipped");case"done":return i==="self-report"?T(e,t,"self-reported"):r;case"appearance":return i==="appearance"&&O(s,n)?T(e,t,"completed"):r;case"tracker-events":{let a=B-t.events.length,c={...t,events:[...t.events,...n.events.slice(0,Math.max(0,a)).map(z)]},p=j(s,n.events);if(i==="interaction"&&p.single)return T(e,c,"completed");if(i==="checklist"&&p.checklistHits.length>0){let f=[...c.checklistHits,...p.checklistHits],g={...c,checklistHits:f};return M(f,s)?T(e,g,"completed"):{state:g,outputs:[]}}return{state:c,outputs:[]}}default:return r}}var Q=5e3;function d(e,t,n,r){let s=e.createElement(t);return n!==void 0&&(s.textContent=n),r&&s.setAttribute("data-testid",r),s}function J(e,t,n){var R,A;let r=e.getElementById("bar"),s=e.getElementById("app"),i=K(),a=!1,c=!1,p=null,f=l=>{var o;return(o=s.contentWindow)==null?void 0:o.postMessage(l,"*")};function g(l){for(let o of l)o.kind==="post"?n.post(o.event):o.kind==="watch-appearance"?(p={...o.selector?{selector:o.selector}:{},...o.label?{label:o.label}:{}},f({type:"PROTOTEST_WATCH_APPEARANCE",...p})):(p=null,f({type:"PROTOTEST_CLEAR_APPEARANCE"}))}function y(l){let o=P(t,i,l);i=o.state,g(o.outputs),S()}function h(l,o,b){let m=d(e,"button",o);m.type="button",m.addEventListener("click",()=>y(b)),l.appendChild(m)}function S(){var o,b,m;r.replaceChildren(),c&&(r.appendChild(d(e,"p","\\u26A0 Tracking isn\'t loading in this build, so no step can complete by itself. Check for a Content-Security-Policy that blocks inline or local scripts.","dryrun-warning")).className="warn");let l=t.steps[i.index];if(i.phase==="intro")r.appendChild(d(e,"h1",t.title)),t.intro&&r.appendChild(d(e,"p",t.intro)),h(r,"Start",{kind:"start"});else if(i.phase==="step"){let u=d(e,"div",void 0,"dryrun-step");u.appendChild(d(e,"strong",`Step ${i.index+1} of ${t.steps.length}`)),u.appendChild(d(e,"p",l.instruction)),l.hint&&i.hintShown&&u.appendChild(d(e,"p",`Hint: ${l.hint}`,"dryrun-hint")),l.hint&&!i.hintShown&&h(u,"Show hint",{kind:"show-hint"}),h(u,"Skip step",{kind:"skip"}),((o=l.completionType)!=null?o:"interaction")==="self-report"&&h(u,"Done",{kind:"done"}),r.appendChild(u)}else if(i.phase==="completed"){let u=d(e,"div",void 0,"dryrun-completed");u.appendChild(d(e,"p",`\\u2713 ${_(l)}`));for(let E of(m=t.stepQuestions[(b=l.importKey)!=null?b:""])!=null?m:[])u.appendChild(d(e,"p",`Question shown here: ${E}`));h(u,i.index+1>=t.steps.length?"Finish":"Continue",{kind:"continue"}),r.appendChild(u)}else{let u=d(e,"div",void 0,"dryrun-finished");if(u.appendChild(d(e,"h1","Flow finished")),u.appendChild(d(e,"p",`${i.completedCount} of ${t.steps.length} steps completed.`)),t.endQuestions.length>0){u.appendChild(d(e,"p","Questions at the end:"));let E=d(e,"ul");for(let q of t.endQuestions)E.appendChild(d(e,"li",q));u.appendChild(E)}r.appendChild(u)}}return(R=e.defaultView)==null||R.addEventListener("message",l=>{var b,m;if(l.source!==s.contentWindow)return;let o=l.data;!o||typeof o!="object"||(o.type==="PROTOTEST_TRACKER_READY"?(a=!0,p&&f({type:"PROTOTEST_WATCH_APPEARANCE",...p})):o.type==="PROTOTEST_EVENTS"&&Array.isArray(o.events)?y({kind:"tracker-events",events:o.events}):o.type==="PROTOTEST_APPEARANCE"&&y({kind:"appearance",selector:(b=o.selector)!=null?b:void 0,label:(m=o.label)!=null?m:void 0}))}),s.addEventListener("load",()=>{var l;try{let o=s.contentWindow,b=(l=o==null?void 0:o.location.pathname)!=null?l:"";o==null||o.addEventListener("error",m=>y({kind:"problem",message:`Script error on ${b}: ${m.message}`}))}catch{}}),n.setTimeout(()=>{a||(c=!0,n.post({type:"tracker-missing",flowKey:t.key}),S())},(A=n.trackerTimeoutMs)!=null?A:Q),S(),{dispatch:y}}async function G(e){let t=document.getElementById("bar"),n=d(document,"p","The dry run server didn\'t save the last step. Is it still running?","dryrun-post-error");n.className="warn",n.hidden=!0,t.after(n);let r;try{let s=await fetch(`/__dryrun/${encodeURIComponent(e)}/flow.json`);if(!s.ok)throw new Error(String(s.status));r=await s.json()}catch{t.textContent="Couldn\'t load this flow from the dry run server. Is `validai-share serve` still running?";return}J(document,r,{post:s=>{fetch("/__dryrun/events",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(s)}).then(i=>{n.hidden=i.ok}).catch(()=>{n.hidden=!1})},setTimeout:(s,i)=>window.setTimeout(s,i)})}typeof window!="undefined"&&typeof window.__DRYRUN_FLOW_KEY=="string"&&G(window.__DRYRUN_FLOW_KEY);})();\n' };
+}
+
 // cli/src/updateCheck.ts
 function installKind(scriptPath) {
   const p = scriptPath.replaceAll("\\", "/");
@@ -1568,10 +2008,30 @@ async function checkForUpdateInfo(appUrl, current, scriptPath, fetchImpl = fetch
 }
 
 // cli/src/index.ts
+var SERVE_USAGE = "Usage: validai-share serve --flows validai-flows.json [build-dir] [--flow <key>] [--port <n>] [--allow-root]";
+function parseServeArgs(rest) {
+  const out = { command: "serve" };
+  for (let i2 = 0; i2 < rest.length; i2 += 1) {
+    const a = rest[i2];
+    if (a === "--flows") out.flows = rest[++i2];
+    else if (a === "--flow") out.flow = rest[++i2];
+    else if (a === "--port") {
+      const n = Number(rest[++i2]);
+      if (Number.isInteger(n) && n > 0 && n < 65536) out.port = n;
+      else out.error = `--port needs a port number from 1 to 65535
+${SERVE_USAGE}`;
+    } else if (a === "--allow-root") out.allowRoot = true;
+    else if (!a.startsWith("--") && out.dir === void 0) out.dir = a;
+    else out.error = `Unknown option ${a}
+${SERVE_USAGE}`;
+  }
+  return out;
+}
 function parseArgs(argv) {
   if (argv[0] === "analysis") return parseAnalysisArgs(argv.slice(1));
   if (argv[0] === "invite") return parseInviteArgs(argv.slice(1));
   if (argv[0] === "findings") return parseFindingsArgs(argv.slice(1));
+  if (argv[0] === "serve") return parseServeArgs(argv.slice(1));
   const command = argv[0] === "login" ? "login" : argv[0] === "pack" ? "pack" : "share";
   const out = { command };
   const rest = command === "share" ? argv : argv.slice(1);
@@ -1708,6 +2168,48 @@ function formatFindings(r) {
   lines.push("", "List the ids of the findings your changes address in the flows file's iteration.addressedFindings.");
   return lines;
 }
+async function runServe(args, cwd) {
+  const assets = embeddedAssets();
+  if (!assets) {
+    console.error("\u2717 serve needs the bundled helper (validai-share.mjs from the ValidAI skill). Run it from the skill's scripts folder.");
+    return 1;
+  }
+  let loaded;
+  let files;
+  try {
+    loaded = loadManifest(cwd, args.flows);
+    files = collectFor(args, cwd);
+  } catch (err2) {
+    console.error(`\u2717 ${err2.message}`);
+    return 1;
+  }
+  const issues = localTagIssues(loaded.manifest, files);
+  if (issues.length > 0) {
+    printTagIssues(issues, console);
+    return 1;
+  }
+  if (args.flow && !loaded.manifest.taskFlows.some((f) => f.key === args.flow)) {
+    console.error(`\u2717 No task flow with key "${args.flow}" in the flows file.`);
+    return 1;
+  }
+  const recordPath = join5(dirname(resolve2(cwd, args.flows ?? DEFAULT_FLOWS_FILE)), RECORD_FILE);
+  let handle;
+  try {
+    handle = await startServe({ files, manifest: loaded.manifest, recordPath, assets, port: args.port, log: (l) => console.log(l) });
+  } catch (err2) {
+    console.error(`\u2717 ${err2.message}`);
+    return 1;
+  }
+  console.log(`Dry run server on ${handle.origin} (Ctrl-C to stop). Each step is printed here and saved to ${RECORD_FILE}.`);
+  for (const u of handle.urls) if (!args.flow || u.flowKey === args.flow) console.log(`  ${u.name}: ${u.url}`);
+  const stop = () => {
+    void handle.close();
+  };
+  process.once("SIGINT", stop);
+  await handle.closed;
+  process.off("SIGINT", stop);
+  return 0;
+}
 async function runFindings(args, cwd, appUrl, token) {
   const ref = readProjectRef(cwd);
   if (!ref) {
@@ -1746,7 +2248,7 @@ async function runInvite(args, cwd, appUrl, token) {
 async function runAnalysis(args, cwd, appUrl, token) {
   try {
     if (args.analysisAction === "import") {
-      const r = await importAnalysis(appUrl, token, readFileSync5(resolve2(cwd, args.dir), "utf-8"));
+      const r = await importAnalysis(appUrl, token, readFileSync6(resolve2(cwd, args.dir), "utf-8"));
       if (r.kind === "flow") {
         console.log(`\u2713 Imported ${r.patterns} pattern${r.patterns === 1 ? "" : "s"} across sessions`);
       } else {
@@ -1765,7 +2267,7 @@ async function runAnalysis(args, cwd, appUrl, token) {
     const dir = resolve2(cwd, args.out ?? "validai-analysis");
     if (files.length) mkdirSync2(dir, { recursive: true });
     for (const f of files) {
-      writeFileSync3(join5(dir, basename(f.filename)), f.markdown);
+      writeFileSync4(join5(dir, basename(f.filename)), f.markdown);
       console.log(`\u2713 Wrote ${join5(args.out ?? "validai-analysis", basename(f.filename))} (${f.kind === "flow" ? "patterns across sessions" : "one analysis per session"})`);
     }
     for (const s of skipped) console.log(`\xB7 ${s}`);
@@ -1791,7 +2293,7 @@ function collectFor(args, cwd) {
 }
 function defaultName(cwd) {
   try {
-    const pkg = JSON.parse(readFileSync5(join5(cwd, "package.json"), "utf-8"));
+    const pkg = JSON.parse(readFileSync6(join5(cwd, "package.json"), "utf-8"));
     if (pkg.name) return pkg.name;
   } catch {
   }
@@ -1823,6 +2325,7 @@ async function run(argv, localUpdate) {
     console.log("Saved to ~/.validai/config.json");
     return 0;
   }
+  if (args.command === "serve") return runServe(args, cwd);
   if (args.command === "findings") {
     const { token: token2, appUrl: appUrl2 } = loadConfig(args, process.env, home);
     if (!token2) {
@@ -1871,7 +2374,7 @@ async function run(argv, localUpdate) {
       return 1;
     }
     const outFile = args.out ?? packageFileName(manifest.manifest, defaultName(cwd));
-    writeFileSync3(resolve2(cwd, outFile), buildPackage(manifest.text, files2, HELPER_VERSION));
+    writeFileSync4(resolve2(cwd, outFile), buildPackage(manifest.text, files2, HELPER_VERSION));
     console.log(
       manifest.manifest.iteration ? `\u2713 Wrote ${outFile} \u2014 upload it in ValidAI \u2192 your prototype \u2192 New Iteration \u2192 drop the .validai file` : `\u2713 Wrote ${outFile} \u2014 upload it in ValidAI \u2192 New Prototype \u2192 drop the .validai file`
     );

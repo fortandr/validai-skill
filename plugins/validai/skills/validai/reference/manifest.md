@@ -25,7 +25,10 @@
       "target": { "tag": "ticket-ga", "label": "General Admission", "context": "Tickets" },
       "intercept": { "trigger": "step-complete", "question": "How easy was that?", "responseType": "scale", "escalateOnLowScore": true }
     }],
-    "endIntercepts": [{ "trigger": "session-end", "question": "Anything confusing?", "responseType": "text" }]
+    "endIntercepts": [
+      { "trigger": "session-end", "question": "Anything confusing?", "responseType": "text" },
+      { "trigger": "session-end", "question": "Who on your team usually buys tickets?", "responseType": "choice", "choices": ["Just me", "Me and one other person", "A small team", "Someone else"], "purpose": "context" }
+    ]
   }]
 }
 ```
@@ -42,6 +45,8 @@
 - `target.tag` is the element's `data-validai-target` value. `label` is its visible text, and `context` is text around it (for example, the section heading). Give a tag whenever you can: it's matched first, and it survives copy changes.
 - Checklist steps use `"targets": [{…}, …]` and `"threshold": N` (default: all targets).
 - `intercept` / `endIntercepts[]`: `responseType` is `scale` (1–5), `choice` (needs `choices`), `reaction`, or `text`. `escalateOnLowScore` applies to `scale` only and asks `followUpQuestion` after a low score.
+- `purpose: "context"` (session-end questions only) marks a question about the tester rather than the prototype: role, team, tools, how often they do the task. The task flow editor marks it "About the tester"; ValidAI labels the answer "About the tester" in the session's notes and in the findings export.
+- `dryRun` (optional) records the skill's dry run of this file: `passed` (every step completed without a skip), `issues-accepted` (the PM chose to push with open problems) or `skipped` (no browser tool was available). ValidAI doesn't use it yet.
 
 ## Validation rules
 
@@ -65,10 +70,12 @@ Every error names a JSON path, e.g. `taskFlows[1].steps[3].target.tag "Pay-Now":
 | `target-forbidden` | `interaction`/`appearance` can't have `targets`/`threshold`; `checklist` can't have `target`; `self-report` can't have any of them. |
 | `threshold-range` | `threshold` is a whole number from 1 to the number of `targets`. |
 | `trigger-invalid` | A step `intercept.trigger` is `step-complete` or `struggle`; `endIntercepts[].trigger` is `session-end`. |
+| `purpose-invalid` | `purpose` is only allowed on `endIntercepts[]` (session-end questions), and its only value is `"context"`. |
 | `response-type` | `responseType` must be `scale`, `choice`, `reaction` or `text`. |
 | `choices-required` | A `choice` question needs at least 2 non-blank `choices`. |
 | `source-kind` | `source.kind` must be one of the kinds listed above. |
 | `finding-id` | Each `iteration.addressedFindings` entry must be a finding id as the findings brief prints it: letters, digits, `_` and `-`, ≤ 200 characters. |
+| `dryrun-invalid` | `dryRun` must be `passed`, `skipped` or `issues-accepted`. |
 | `missing-tag` | Every `tag` must appear as `data-validai-target="…"` in the build. It's an error for uploaded builds, and a warning for URL prototypes. |
 
 ## Re-importing
