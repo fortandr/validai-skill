@@ -2,14 +2,14 @@
 name: validai
 description: Prepare a prototype for user validation in ValidAI — read the prototype, recommend Task Flows from the PM's goals and validation evidence (in-person notes, transcripts, PRD), tag click targets with data-validai-target, then push to ValidAI or package a .validai file; also analyze ValidAI test results with your own AI (export the request, answer it, import the result). Use when the user mentions ValidAI, wants to test or validate a prototype with users, wants task flows created, or wants usability test results analyzed.
 metadata:
-  version: "2026.11.25"
+  version: "2026.11.26"
 ---
 
 # ValidAI: prepare a prototype for validation
 
 Use this when a PM wants to test a prototype in ValidAI: upload it, turn their goals and validation evidence into recommended **Task Flows**, and make testers' clicks register reliably.
 
-ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.25
+ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.26
 
 ## Ground rules
 
@@ -62,18 +62,18 @@ Keep flows to 3–7 steps, and ask sparingly. Wait for the PM's "yes" (or edits)
 
 ## 5. Dry run
 
-First, write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.25" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
+First, write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.26" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
 
 Before anything is uploaded, walk every flow the way a tester would, against the local build. This catches steps that can't be done, controls that don't count when clicked, and instructions that give the answer away, so they're fixed before real testers spend time on them.
 
-1. **Check for a browser tool** you can drive: Claude in Chrome, the Claude desktop app's built-in browser, or a Playwright MCP server. If you have none, tell the PM the dry run needs one of these, set `"dryRun": "skipped"` in `validai-flows.json`, and go to **6. Verify and hand off**.
+1. **Check for a browser tool** you can drive: Claude in Chrome, the Claude desktop app's built-in browser, or a Playwright MCP server. If you have none, tell the PM the dry run needs one of these, set `"dryRun": "skipped"` in `validai-flows.json`, remove every flow's `dryRunSteps` (they'd be an earlier build's run), and go to **6. Verify and hand off**.
 2. **Start the local server** in the background, in the folder holding `validai-flows.json`:
 
    ```
    node ${CLAUDE_SKILL_DIR}/scripts/validai-share.mjs serve --flows validai-flows.json [build-dir]
    ```
 
-   It prints one URL per flow. Each opens a tester screen: a bar with the step, **Show hint** (when the step has a hint), **Skip step** and (for self-report steps) **Done**, above the prototype. A step completes only when ValidAI would count it for a real tester. Every step outcome is printed by the server and saved to `validai-dryrun.json` next to the flows file. It is never uploaded. Add `validai-dryrun.json` to the project's `.gitignore` if it has one.
+   It prints one URL per flow. Each opens a tester screen: a bar with the step, **Show hint** (when the step has a hint), **Skip step** and (for self-report steps) **Done**, above the prototype. A step completes only when ValidAI would count it for a real tester. Every step outcome is printed by the server and saved to `validai-dryrun.json` next to the flows file. The file itself is never uploaded; item 7 copies each flow's final step results into `validai-flows.json`. Add `validai-dryrun.json` to the project's `.gitignore` if it has one.
 3. **Walk each flow blind.** If you can start subagents, give each flow to a fresh one whose brief holds only the flow's URL, the browser tool, and this role: *"You are a first-time tester. Do each step from its instruction, as a tester would. Don't read page source or `data-` attributes. If you're lost after a fair try, use Show hint (if the step has one). If you're still lost, use Skip step. After 3 failed actions on one step, skip it and say why. Note anything confusing: wording, labels, what you expected to happen. Report, per step, what you tried and what confused you."* Without subagents, walk it yourself without opening source files during the walk, and say in the report that the run wasn't blind.
 4. **Combine** the walker's notes with `validai-dryrun.json`. Give each problem one type:
    - **Not tracked:** the walker did the right thing but the step didn't complete. Use the recorded events and the source to find out why (a tag on a wrapper instead of the control, a tag on a `<select>` but not the chosen `<option>`, a `label` that doesn't match). If the flow has `"trackerMissing": true`, the cause is the build blocking injected scripts (often a Content-Security-Policy meta tag).
@@ -82,7 +82,7 @@ Before anything is uploaded, walk every flow the way a tester would, against the
    - **Wording:** the instruction names the control it asks the tester to find, is ambiguous, or doesn't match the screen; or a question reads poorly.
 5. **Show the PM the report.** Start with this line, exactly: *"This checks that each flow works and reads clearly. It doesn't predict how testers will find it. Claude is more patient and more literal than real testers."* Then one block per flow: its name and how many steps worked, each step with ✓ or ✗ and any problem type, and for each problem the fix you propose.
 6. **Fix loop.** Make the fixes the PM approves (code, tags or flow text), rebuild, and run the dry run again on the flows you changed. Repeat until the PM is satisfied.
-7. **Record the result** in `validai-flows.json`: `"dryRun": "passed"` when every step completed without a skip, `"issues-accepted"` when the PM chose to go ahead with open problems, or `"skipped"` (item 1 above). Stop the server.
+7. **Record the result** in `validai-flows.json`: `"dryRun": "passed"` when every step completed without a skip, `"issues-accepted"` when the PM chose to go ahead with open problems, or `"skipped"` (item 1 above). For each flow you walked, also add its final run as `dryRunSteps` (format: `reference/manifest.md`): from `validai-dryrun.json`, each step's `outcome` and `hintUsed`, and, for a step with a problem from item 4, its `problem` (`not-tracked`, `couldnt-complete`, `needed-hint` or `wording`) and a one-line `note` (≤ 200 characters) saying what went wrong. Use only each flow's last run, never the fix loop's earlier attempts. ValidAI shows it on Insights → Compare next to real testers' results. When the dry run was skipped, or a flow wasn't walked on this build, remove that flow's `dryRunSteps` (and its entry in `validai-dryrun.json`) before upload: they describe an earlier build. Stop the server.
 
 ## 6. Verify and hand off
 
@@ -136,7 +136,7 @@ An invite stays on the iteration it was created for. After a new iteration, crea
 
 Use this when the PM wants the prototype changed to fix what testing found. They usually give you a findings brief from ValidAI (Insights → **Export validated for AI**, or **Iterate** on one finding). Each finding in it has a `Finding id`.
 
-Every iteration should name the findings it addresses: that is how ValidAI checks whether the fixes worked. If the PM describes the problems in their own words, pastes titles, or gives no brief, get the ids yourself. With a CLI token, in the folder holding `.validai.json`:
+Every iteration should name the findings it addresses: that is how ValidAI's Compare marks the steps each fix targeted. If the PM describes the problems in their own words, pastes titles, or gives no brief, get the ids yourself. With a CLI token, in the folder holding `.validai.json`:
 
 ```
 node ${CLAUDE_SKILL_DIR}/scripts/validai-share.mjs findings
@@ -155,16 +155,16 @@ It lists the prototype's open findings (tracked, not yet addressed by an iterati
    }
    ```
 
-   - `changes`: what a tester will notice, in plain words, one sentence per change (≤ 2000 characters). The PM reads it on Iteration comparison next to the before-and-after numbers.
+   - `changes`: what a tester will notice, in plain words, one sentence per change (≤ 2000 characters). The PM reads it on Insights → Compare next to the before-and-after numbers.
    - `addressedFindings`: the `Finding id` of each finding your changes address, copied exactly from the brief or from `findings`. Leave out findings you didn't address. Before handing off, show the PM the list as titles ("These changes address: …") and let them add or remove any. Leave it empty only when the changes address no tracked finding (say so to the PM); the push then warns that the iteration isn't linked.
    - Keep `taskFlows` up to date for the new build: in ValidAI, task flows and invites are locked to the iteration they were made for, so the flows in this file are set up fresh on the new iteration. Keep each flow's `key` and step `key`s the same, so results still line up with the earlier iteration. Update a flow only where your changes affect its steps, and show the PM those step changes before handing off.
-4. Run the dry run (**5. Dry run**) on every flow, since a change to one screen can break steps in other flows. Then hand off the same way as **6. Verify and hand off** (A, B or C). With an `iteration` block:
+4. Run the dry run (**5. Dry run**) on every flow, since a change to one screen can break steps in other flows. First delete `validai-dryrun.json` and every flow's `dryRunSteps`: they're the previous build's run, and only this build's run may be uploaded. If the dry run is skipped this time, set `"dryRun": "skipped"` and leave `dryRunSteps` out. Then hand off the same way as **6. Verify and hand off** (A, B or C). With an `iteration` block:
    - **Push** starts the next iteration with the new build, then sets up the flows on it. It prints the new iteration number. Earlier iterations keep their flows, sessions and invites.
    - **Package**: the PM opens the prototype in ValidAI → **New Iteration** and drops the `.validai` file. It fills in what changed, ticks the findings, and sets up the flows.
    - Invites stay on their iteration: offer to create new invite links for the new flows (see **Create invite links**), and remind the PM to close the old ones in ValidAI → Invites when they stop testing the old version.
 5. After a successful hand-off, **delete the `iteration` block** from `validai-flows.json`. It describes one iteration only, and a later push with it still in place would start another iteration with the same text.
 
-Finish by telling the PM the iteration number and what it addresses, with the link https://validai.lukantan.com/prototypes. If the push printed that the iteration isn't linked to any findings, or left out finding ids, tell the PM and point them to ValidAI → Insights → **Link findings** for that iteration.
+Finish by telling the PM the iteration number and what it addresses, with the link https://validai.lukantan.com/prototypes. If the push printed that the iteration isn't linked to any findings, or left out finding ids, tell the PM and point them to ValidAI → Insights → **Compare** → **Link findings** for that iteration.
 
 ## Analyze test results with your own AI
 
@@ -178,13 +178,13 @@ When the PM wants test results analyzed by you instead of ValidAI's AI key (or h
 
    This writes Markdown files to `validai-analysis/`: `validai-patterns-…md` (patterns across a task flow's sessions) and `validai-sessions-…md` (one analysis per session not yet analyzed). Without a shell, the PM downloads them in ValidAI → Insights → Findings → **Use your own AI** on the task flow's row.
 2. For each file, follow its Instructions on its Data exactly. Write the answer as a JSON file shaped as the file's "What to do" section says: the `validaiRequest` object copied unchanged, plus `result` (patterns) or `results` (one `{ "tester", "result" }` per session). Base every finding on the data: count testers out of the total, and don't invent quotes or numbers.
-   A patterns file's Data can also hold `existingFindings` (the flow's findings, with ids like `I2` and their status) and, on iteration 2 or later, `fixChecks` (the findings that iteration was made to fix, with their numbers before). Set each pattern's `existingFinding` to the id of the finding it is, or `""` for a new problem, and fill the answer's `fixChecks` with one verdict and reason per finding exactly as the Instructions say. Use `[]` when the Data has no `fixChecks`.
+   A patterns file's Data can also hold `existingFindings` (the flow's findings, with ids like `I2` and their status). Set each pattern's `existingFinding` to the id of the finding it is, or `""` for a new problem.
 3. Send each answer back:
 
    ```
    node ${CLAUDE_SKILL_DIR}/scripts/validai-share.mjs analysis import validai-analysis/<name>.result.json
    ```
 
-   ValidAI checks it like its own AI's output and files it: each pattern becomes a draft finding on Insights → Findings (or refreshes the draft it names), each fix check becomes a proposed verdict under **Did the fixes work?**, and session analyses feed the next patterns analysis. Without a shell, the PM imports the file in the same **Use your own AI** window. If the import reports a problem, fix that part of the JSON and import again.
+   ValidAI checks it like its own AI's output and files it: each pattern becomes a draft finding on Insights → Findings (or refreshes the draft it names), and session analyses feed the next patterns analysis. Without a shell, the PM imports the file in the same **Use your own AI** window. If the import reports a problem, fix that part of the JSON and import again.
 
-Finish by telling the PM what was imported, with the link https://validai.lukantan.com/prototypes, and that the drafts wait on Insights → Findings to be validated or dismissed, and the proposed verdicts under **Did the fixes work?** to be confirmed.
+Finish by telling the PM what was imported, with the link https://validai.lukantan.com/prototypes, and that the drafts wait on Insights → Findings to be validated or dismissed.

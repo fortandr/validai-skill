@@ -28,6 +28,9 @@
     "endIntercepts": [
       { "trigger": "session-end", "question": "Anything confusing?", "responseType": "text" },
       { "trigger": "session-end", "question": "Who on your team usually buys tickets?", "responseType": "choice", "choices": ["Just me", "Me and one other person", "A small team", "Someone else"], "purpose": "context" }
+    ],
+    "dryRunSteps": [                                // optional; the skill's final dry run of this flow, see below
+      { "step": "choose-ticket", "outcome": "completed", "hintUsed": false }
     ]
   }]
 }
@@ -46,7 +49,8 @@
 - Checklist steps use `"targets": [{…}, …]` and `"threshold": N` (default: all targets).
 - `intercept` / `endIntercepts[]`: `responseType` is `scale` (1–5), `choice` (needs `choices`), `reaction`, or `text`. `escalateOnLowScore` applies to `scale` only and asks `followUpQuestion` after a low score.
 - `purpose: "context"` (session-end questions only) marks a question about the tester rather than the prototype: role, team, tools, how often they do the task. The task flow editor marks it "About the tester"; ValidAI labels the answer "About the tester" in the session's notes and in the findings export.
-- `dryRun` (optional) records the skill's dry run of this file: `passed` (every step completed without a skip), `issues-accepted` (the PM chose to push with open problems) or `skipped` (no browser tool was available). ValidAI doesn't use it yet.
+- `dryRun` (optional) records the skill's dry run of this file: `passed` (every step completed without a skip), `issues-accepted` (the PM chose to push with open problems) or `skipped` (no browser tool was available). ValidAI doesn't use it yet, except that `skipped` makes ValidAI ignore any `dryRunSteps` in the file.
+- `dryRunSteps` (optional, per flow) is that flow's final dry run, one entry per step walked: `step` (a step `key` of the same flow), `outcome` (`completed`, `skipped` or `self-reported`), `hintUsed` (`true` or `false`; default `false`), and, for a step with a problem, `problem` (`not-tracked`, `couldnt-complete`, `needed-hint` or `wording`) and a one-line `note` (≤ 200 characters) saying what went wrong. Only the last run of each flow, never the fix loop's earlier attempts, and never events or page errors. The helper's `pack` and push fill in `outcome` and `hintUsed` from `validai-dryrun.json` for a flow that has no `dryRunSteps` (unless `dryRun` is `skipped`). ValidAI stores it on the task flow and shows it on Insights → Compare next to real testers' results; a re-import replaces it.
 
 ## Validation rules
 
@@ -61,10 +65,10 @@ Every error names a JSON path, e.g. `taskFlows[1].steps[3].target.tag "Pay-Now":
 | `type` | A field has the wrong JSON type. |
 | `key-format` | Flow keys, step keys and tags must match `^[a-z0-9][a-z0-9-]{0,63}$` (lowercase kebab-case, ≤ 64). |
 | `reserved-suffix` | Flow keys must not end in `--v<number>` (ValidAI uses it for versions). |
-| `duplicate-key` | Flow keys are unique in the file; step keys are unique within their flow. |
+| `duplicate-key` | Flow keys are unique in the file; step keys are unique within their flow. A step appears at most once in a flow's `dryRunSteps`. |
 | `empty-list` | At least 1 task flow, and at least 1 step per flow. |
-| `too-many` | At most 50 task flows, at most 100 steps per flow, and at most 100 `iteration.addressedFindings`. |
-| `too-long` | `name` ≤ 120, `instruction` ≤ 500, `completionMessage` ≤ 200, `hint` ≤ 300, intercept `question`/`followUpQuestion` ≤ 500, `rationale` ≤ 1000, `testTitle` ≤ 120, `testIntro` ≤ 2000, `source.notes` ≤ 500, `prototype.builtWith` ≤ 60, `generator.name`/`generator.version` ≤ 40, `iteration.changes` ≤ 2000 characters. |
+| `too-many` | At most 50 task flows, at most 100 steps per flow, at most 100 `iteration.addressedFindings`, and at most 100 `dryRunSteps` per flow. |
+| `too-long` | `name` ≤ 120, `instruction` ≤ 500, `completionMessage` ≤ 200, `hint` ≤ 300, intercept `question`/`followUpQuestion` ≤ 500, `rationale` ≤ 1000, `testTitle` ≤ 120, `testIntro` ≤ 2000, `source.notes` ≤ 500, `prototype.builtWith` ≤ 60, `generator.name`/`generator.version` ≤ 40, `iteration.changes` ≤ 2000, `dryRunSteps[].note` ≤ 200 characters. |
 | `completion-type` | `completionType` must be `interaction`, `appearance`, `checklist` or `self-report`. |
 | `target-required` | `interaction`/`appearance` need `target`; `checklist` needs ≥ 1 `targets`; every target needs a `tag` or a `label`. |
 | `target-forbidden` | `interaction`/`appearance` can't have `targets`/`threshold`; `checklist` can't have `target`; `self-report` can't have any of them. |
@@ -76,6 +80,7 @@ Every error names a JSON path, e.g. `taskFlows[1].steps[3].target.tag "Pay-Now":
 | `source-kind` | `source.kind` must be one of the kinds listed above. |
 | `finding-id` | Each `iteration.addressedFindings` entry must be a finding id as the findings brief prints it: letters, digits, `_` and `-`, ≤ 200 characters. |
 | `dryrun-invalid` | `dryRun` must be `passed`, `skipped` or `issues-accepted`. |
+| `dryrun-step-invalid` | Each `dryRunSteps[]` entry's `step` is a step `key` of its flow, its `outcome` is `completed`, `skipped` or `self-reported`, and its `problem` (optional) is `not-tracked`, `couldnt-complete`, `needed-hint` or `wording`. |
 | `missing-tag` | Every `tag` must appear as `data-validai-target="…"` in the build. It's an error for uploaded builds, and a warning for URL prototypes. |
 
 ## Re-importing
