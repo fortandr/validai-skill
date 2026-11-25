@@ -2,14 +2,14 @@
 name: validai
 description: Prepare a prototype for user validation in ValidAI — read the prototype, recommend Task Flows from the PM's goals and validation evidence (in-person notes, transcripts, PRD), tag click targets with data-validai-target, then push to ValidAI or package a .validai file; also analyze ValidAI test results with your own AI (export the request, answer it, import the result). Use when the user mentions ValidAI, wants to test or validate a prototype with users, wants task flows created, or wants usability test results analyzed.
 metadata:
-  version: "2026.11.24"
+  version: "2026.11.25"
 ---
 
 # ValidAI: prepare a prototype for validation
 
 Use this when a PM wants to test a prototype in ValidAI: upload it, turn their goals and validation evidence into recommended **Task Flows**, and make testers' clicks register reliably.
 
-ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.24
+ValidAI app: https://validai.lukantan.com · Skill version: 2026.11.25
 
 ## Ground rules
 
@@ -62,7 +62,7 @@ Keep flows to 3–7 steps, and ask sparingly. Wait for the PM's "yes" (or edits)
 
 ## 5. Dry run
 
-First, write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.24" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
+First, write `validai-flows.json` (format and rules: `reference/manifest.md`). Set `prototype.builtWith` to the assistant you are running in (e.g. "Claude Code", "Claude.ai", "Cursor", "Codex") — ValidAI shows it as the prototype's "Built with" label. Also set `"generator": { "name": "validai-skill", "version": "2026.11.25" }` exactly as written here, so ValidAI can tell the PM when this skill is out of date.
 
 Before anything is uploaded, walk every flow the way a tester would, against the local build. This catches steps that can't be done, controls that don't count when clicked, and instructions that give the answer away, so they're fixed before real testers spend time on them.
 
@@ -176,14 +176,15 @@ When the PM wants test results analyzed by you instead of ValidAI's AI key (or h
    node ${CLAUDE_SKILL_DIR}/scripts/validai-share.mjs analysis export [--flow <taskFlowId>] [--kind flow|sessions|all]
    ```
 
-   This writes Markdown files to `validai-analysis/`: `validai-patterns-…md` (patterns across a task flow's sessions) and `validai-sessions-…md` (one analysis per session not yet analyzed). Without a shell, the PM downloads them in ValidAI → Insights → AI analysis → **Use your own AI**.
+   This writes Markdown files to `validai-analysis/`: `validai-patterns-…md` (patterns across a task flow's sessions) and `validai-sessions-…md` (one analysis per session not yet analyzed). Without a shell, the PM downloads them in ValidAI → Insights → Findings → **Use your own AI** on the task flow's row.
 2. For each file, follow its Instructions on its Data exactly. Write the answer as a JSON file shaped as the file's "What to do" section says: the `validaiRequest` object copied unchanged, plus `result` (patterns) or `results` (one `{ "tester", "result" }` per session). Base every finding on the data: count testers out of the total, and don't invent quotes or numbers.
+   A patterns file's Data can also hold `existingFindings` (the flow's findings, with ids like `I2` and their status) and, on iteration 2 or later, `fixChecks` (the findings that iteration was made to fix, with their numbers before). Set each pattern's `existingFinding` to the id of the finding it is, or `""` for a new problem, and fill the answer's `fixChecks` with one verdict and reason per finding exactly as the Instructions say. Use `[]` when the Data has no `fixChecks`.
 3. Send each answer back:
 
    ```
    node ${CLAUDE_SKILL_DIR}/scripts/validai-share.mjs analysis import validai-analysis/<name>.result.json
    ```
 
-   ValidAI checks it like its own AI's output and files it: patterns under "Patterns across sessions", session findings in the review inbox. Without a shell, the PM imports the file in the same **Use your own AI** window. If the import reports a problem, fix that part of the JSON and import again.
+   ValidAI checks it like its own AI's output and files it: each pattern becomes a draft finding on Insights → Findings (or refreshes the draft it names), each fix check becomes a proposed verdict under **Did the fixes work?**, and session analyses feed the next patterns analysis. Without a shell, the PM imports the file in the same **Use your own AI** window. If the import reports a problem, fix that part of the JSON and import again.
 
-Finish by telling the PM what was imported, with the link https://validai.lukantan.com/prototypes.
+Finish by telling the PM what was imported, with the link https://validai.lukantan.com/prototypes, and that the drafts wait on Insights → Findings to be validated or dismissed, and the proposed verdicts under **Did the fixes work?** to be confirmed.
